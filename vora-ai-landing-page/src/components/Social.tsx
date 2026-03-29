@@ -20,9 +20,9 @@ export default function Social() {
               Join Telegram Group
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform opacity-70" />
             </a>
-            <a href="https://x.com/vora_ai" target="_blank" rel="noreferrer" className="group flex items-center gap-3 text-white font-medium hover:text-blue-300 transition-colors bg-white/5 px-8 py-4 rounded-full hover:bg-white/10 border border-white/10">
+            <a href="https://x.com/HeyVora_AI" target="_blank" rel="noreferrer" className="group flex items-center gap-3 text-white font-medium hover:text-blue-300 transition-colors bg-white/5 px-8 py-4 rounded-full hover:bg-white/10 border border-white/10">
               <Twitter className="w-5 h-5 text-blue-400" />
-              Follow @vora_ai
+              Follow @HeyVora_AI
             </a>
           </div>
         </motion.div>
