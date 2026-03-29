@@ -24,7 +24,7 @@ export default function Header() {
           <img
             src="/vora-logo-v2.png"
             alt="VORA logo"
-            className="w-8 h-8 object-contain"
+            className="w-20 h-20 object-contain"
           />
           <span className="font-display font-bold text-xl tracking-tight">VORA</span>
         </div>

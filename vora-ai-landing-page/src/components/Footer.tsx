@@ -15,7 +15,7 @@ export default function Footer() {
             <img
               src="/vora-logo-v2.png"
               alt="VORA logo"
-              className="w-5 h-5 object-contain"
+              className="w-12 h-12 object-contain"
             />
             <span className="font-display font-bold tracking-tight text-white">VORA</span>
           </div>
