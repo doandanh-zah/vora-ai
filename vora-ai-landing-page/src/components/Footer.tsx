@@ -13,7 +13,7 @@ export default function Footer() {
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2 opacity-80">
             <img
-              src="/vora-logo.png"
+              src="/vora-logo-v2.png"
               alt="VORA logo"
               className="w-5 h-5 object-contain"
             />
