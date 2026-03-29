@@ -1,7 +1,14 @@
 import { motion } from 'motion/react';
 import { Apple, Monitor } from 'lucide-react';
 
+const releaseSoonMessage =
+  "VORA 1.0 has not been released yet. Please join our Telegram group and follow us on X (@HeyVora_AI) to get launch updates.";
+
 export default function Hero() {
+  const handleDownloadClick = () => {
+    window.alert(releaseSoonMessage);
+  };
+
   return (
     <section className="relative min-h-screen flex items-center justify-center pt-24 pb-12 px-6 overflow-hidden">
       <div className="max-w-5xl mx-auto text-center z-10 w-full">
@@ -15,7 +22,7 @@ export default function Hero() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
           </span>
-          VORA 1.0 is now available
+          VORA 1.0 will release soon
         </motion.div>
 
         <motion.h1
@@ -43,12 +50,18 @@ export default function Hero() {
           transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
-          <button className="group relative w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 rounded-full bg-white text-black font-medium text-sm transition-all hover:scale-105 hover:shadow-[0_0_30px_rgba(34,211,238,0.4)] overflow-hidden">
+          <button
+            onClick={handleDownloadClick}
+            className="group relative w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 rounded-full bg-white text-black font-medium text-sm transition-all hover:scale-105 hover:shadow-[0_0_30px_rgba(34,211,238,0.4)] overflow-hidden"
+          >
             <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-cyan-400/20 opacity-0 group-hover:opacity-100 transition-opacity" />
             <Apple className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Download for Mac</span>
           </button>
-          <button className="group w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 rounded-full glass hover:bg-white/5 border border-white/10 font-medium text-sm transition-all hover:scale-105 hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(34,211,238,0.15)]">
+          <button
+            onClick={handleDownloadClick}
+            className="group w-full sm:w-auto flex items-center justify-center gap-3 px-8 py-4 rounded-full glass hover:bg-white/5 border border-white/10 font-medium text-sm transition-all hover:scale-105 hover:border-cyan-500/50 hover:shadow-[0_0_20px_rgba(34,211,238,0.15)]"
+          >
             <Monitor className="w-5 h-5 text-gray-300 group-hover:text-cyan-400 transition-colors" />
             <span>Download for Windows</span>
           </button>

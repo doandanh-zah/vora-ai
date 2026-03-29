@@ -1,7 +1,14 @@
 import { motion } from 'motion/react';
 import { Apple, Monitor, Download as DownloadIcon } from 'lucide-react';
 
+const releaseSoonMessage =
+  "VORA 1.0 has not been released yet. Please join our Telegram group and follow us on X (@HeyVora_AI) to get launch updates.";
+
 export default function Download() {
+  const handleDownloadClick = () => {
+    window.alert(releaseSoonMessage);
+  };
+
   return (
     <section id="download" className="py-24 px-6 relative z-10">
       <div className="max-w-5xl mx-auto">
@@ -22,7 +29,10 @@ export default function Download() {
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl">
-              <button className="group flex flex-col items-center justify-center gap-4 p-8 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)]">
+              <button
+                onClick={handleDownloadClick}
+                className="group flex flex-col items-center justify-center gap-4 p-8 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all hover:border-cyan-500/50 hover:shadow-[0_0_30px_rgba(34,211,238,0.15)]"
+              >
                 <Apple className="w-10 h-10 text-white" />
                 <div>
                   <div className="font-semibold text-lg">MacBook Silicon</div>
@@ -33,7 +43,10 @@ export default function Download() {
                 </div>
               </button>
 
-              <button className="group flex flex-col items-center justify-center gap-4 p-8 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+              <button
+                onClick={handleDownloadClick}
+                className="group flex flex-col items-center justify-center gap-4 p-8 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]"
+              >
                 <Monitor className="w-10 h-10 text-white" />
                 <div>
                   <div className="font-semibold text-lg">Windows 11</div>
