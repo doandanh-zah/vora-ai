@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Mic } from 'lucide-react';
 
 export default function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -22,9 +21,11 @@ export default function Header() {
     >
       <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-vora flex items-center justify-center shadow-[0_0_15px_rgba(34,211,238,0.4)]">
-            <Mic className="w-5 h-5 text-white" />
-          </div>
+          <img
+            src="/vora-logo.png"
+            alt="VORA logo"
+            className="w-8 h-8 object-contain"
+          />
           <span className="font-display font-bold text-xl tracking-tight">VORA</span>
         </div>
 
