@@ -1,151 +1,169 @@
-# VORA Command Reference (Install / Publish / Update / Uninstall)
+# VORA Commands For End Users
 
-## 0) Bien moi truong
+## 1) Cai dat nhanh (khuyen nghi)
 
-```bash
-# Repo local
-REPO="/Users/doandothanhdanh/Desktop/ZAH_CODE/vora/vora-ai/vora-core"
-
-# Package tren npm registry
-PKG="vora-ai"
-
-# Ban muc tieu hien tai
-VER="0.1.1"
-```
-
-## 1) Build + smoke local truoc khi dong goi
+### macOS / Linux / WSL
 
 ```bash
-cd "$REPO"
-pnpm install --no-frozen-lockfile
-pnpm build
-node scripts/phase0-m2-tool-smoke.mjs
-node scripts/phase0-m3-rebrand-audit.mjs
-```
-
-## 2) Pack local `.tgz`
-
-```bash
-cd "$REPO"
-npm pack
-```
-
-Kiem tra output trong tarball:
-
-```bash
-tar -tf "$REPO/vora-ai-$VER.tgz" | rg '^package/dist/(index\.js|build-info\.json)$'
-```
-
-## 3) Cai dat cho user that (khuyen nghi)
-
-```bash
-npm i -g "$PKG"
+npm i -g vora-ai
 vora --version
-npm ls -g --depth=0 "$PKG"
 ```
 
-## 4) Cai dat global tu file `.tgz` (fallback offline)
+### Windows PowerShell
 
-### macOS / Linux
+```powershell
+npm i -g vora-ai
+vora --version
+```
+
+## 2) Kiem tra cai dat
+
+### Tat ca he
 
 ```bash
-npm i -g --force "$REPO/vora-ai-$VER.tgz"
+vora --version
+vora --help
+```
+
+### Kiem tra binary path
+
+macOS / Linux / WSL:
+
+```bash
+which vora
+```
+
+Windows CMD:
+
+```bat
+where vora
+```
+
+Windows PowerShell:
+
+```powershell
+Get-Command vora
+```
+
+## 3) Cac lenh user da test (2026-04-02)
+
+### Doctor
+
+```bash
+vora doctor
+vora doctor --non-interactive --yes
+```
+
+### Configure (interactive wizard)
+
+```bash
+vora configure
+```
+
+Chay nhanh dung section:
+
+```bash
+vora configure --section gateway
+```
+
+### Models
+
+```bash
+vora models list
+vora models status --json
+```
+
+### Gateway (install / start / restart)
+
+Dat mode local truoc:
+
+```bash
+vora config set gateway.mode local
+```
+
+Cai service + start + status + restart:
+
+```bash
+vora gateway install --force
+vora gateway start
+vora gateway status
+vora gateway restart
+vora gateway status
+```
+
+Neu bi dung cong `18789` (xung dot voi process khac), chay cong rieng:
+
+```bash
+vora gateway --port 19001 install --force
+vora gateway --port 19001 start
+vora gateway --port 19001 status
+vora gateway --port 19001 restart
+```
+
+## 4) Cap nhat len ban moi nhat
+
+```bash
+npm i -g vora-ai@latest
+vora --version
+```
+
+## 5) Cai 1 version cu the
+
+```bash
+npm i -g vora-ai@0.1.1
+vora --version
+```
+
+## 6) Go cai dat
+
+```bash
+npm uninstall -g vora-ai
+```
+
+Kiem tra da go:
+
+```bash
+vora --version
+```
+
+Neu go thanh cong, lenh tren se bao `command not found` (hoac tuong duong).
+
+## 7) Cai lai sach (khi bi loi)
+
+```bash
+npm uninstall -g vora-ai
+npm cache clean --force
+npm i -g vora-ai
+vora --version
+```
+
+## 8) Cai tu file `.tgz` (fallback)
+
+### macOS / Linux / WSL
+
+```bash
+npm i -g --force /path/to/vora-ai-0.1.1.tgz
+vora --version
 ```
 
 ### Windows PowerShell
 
 ```powershell
 npm i -g --force "C:\path\to\vora-ai-0.1.1.tgz"
-```
-
-### WSL
-
-```bash
-npm i -g --force "/mnt/c/path/to/vora-ai-0.1.1.tgz"
-```
-
-## 5) Publish len npm
-
-```bash
-cd "$REPO"
-npm whoami
-npm publish --access public
-```
-
-Neu gap `E403 Two-factor authentication ... is required`:
-
-```bash
-# Dung granular token co bypass 2FA cho publish
-read -s NPM_TOKEN
-echo
-npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-npm whoami
-npm publish --access public
-```
-
-## 6) Kiem tra sau publish
-
-```bash
-npm view "$PKG" version dist-tags.latest
-npm i -g "$PKG"
-vora --version
-which vora  # macOS/Linux/WSL
-```
-
-Windows:
-
-```bat
-where vora
-```
-
-## 7) Update / pin version
-
-```bash
-# update latest
-npm i -g "$PKG@latest"
-
-# pin 1 version cu the
-npm i -g "$PKG@$VER"
-
 vora --version
 ```
 
-## 8) Uninstall + clean reinstall
+## 9) Troubleshooting nhanh
+
+### Loi `vora: command not found`
 
 ```bash
-npm uninstall -g "$PKG"
-npm cache clean --force
-npm i -g "$PKG"
-vora --version
+npm ls -g --depth=0 vora-ai
 ```
 
-## 9) Chay truc tiep tu source (khong cai global)
+Neu thay da cai ma van khong chay, mo terminal moi roi thu lai:
 
 ```bash
-cd "$REPO"
-pnpm build
-node vora.mjs --version
-```
-
-## 10) Troubleshooting nhanh
-
-### `E403` khi publish
-
-- Nguyen nhan thuong gap: account bat 2FA cho publish, nhung dang login bang web token khong co bypass 2FA.
-- Cach fix: dung granular access token co quyen publish + bypass 2FA.
-
-### CLI hien sai version (`0.0.0`)
-
-```bash
-vora --version
-npm ls -g --depth=0 "$PKG"
-```
-
-Neu package da dung ma version van sai, go va cai lai:
-
-```bash
-npm uninstall -g "$PKG"
-npm i -g "$PKG"
 vora --version
 ```
 
@@ -155,7 +173,9 @@ vora --version
 node --version
 ```
 
-### Neu dung nvm
+VORA yeu cau Node `>=22.14.0`.
+
+Neu dung `nvm`:
 
 ```bash
 nvm install 22
@@ -163,13 +183,28 @@ nvm use 22
 nvm alias default 22
 ```
 
-## 11) Lenh nhanh all-in-one (macOS/Linux)
+### Loi gateway `device signature invalid` hoac status fail
 
 ```bash
-cd /Users/doandothanhdanh/Desktop/ZAH_CODE/vora/vora-ai/vora-core && pnpm install --no-frozen-lockfile && pnpm build && node scripts/phase0-m2-tool-smoke.mjs && node scripts/phase0-m3-rebrand-audit.mjs && npm publish --access public && npm i -g vora-ai && vora --version
+vora gateway status --deep
+vora doctor
 ```
 
-## 12) Luu y bao mat
+Neu van fail do conflict cong:
 
-- Khong commit token vao repo.
-- Neu lo token (paste chat/log), revoke token ngay trong npm account va tao token moi.
+```bash
+vora gateway --port 19001 install --force
+vora gateway --port 19001 restart
+vora gateway --port 19001 status
+```
+
+## 10) Lenh nhanh 1 dong (macOS / Linux)
+
+```bash
+npm i -g vora-ai@latest && vora --version
+```
+
+## 11) Ghi chu
+
+- Day la tai lieu cho nguoi dung cuoi, khong bao gom lenh publish/build noi bo.
+- Package install chuan: `vora-ai`.
