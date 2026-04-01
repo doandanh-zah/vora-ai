@@ -1,13 +1,22 @@
 import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-agent";
-import type { VoraConfig } from "../config/config.js";
+import { loadConfig, type VoraConfig } from "../config/config.js";
 import type { ModelCompatConfig } from "../config/types.models.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
-import { getPluginToolMeta } from "../plugins/tools.js";
+import { getPluginToolMeta, resolvePluginTools } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
-import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
-import { resolveAgentConfig } from "./agent-scope.js";
+import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime.js";
+import {
+  type GatewayMessageChannel,
+  resolveGatewayMessageChannel,
+} from "../utils/message-channel.js";
+import {
+  resolveAgentConfig,
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveSessionAgentId,
+} from "./agent-scope.js";
 import { createApplyPatchTool } from "./apply-patch.js";
 import {
   createExecTool,
@@ -19,7 +28,25 @@ import { listChannelAgentTools } from "./channel-tools.js";
 import { shouldSuppressManagedWebSearchTool } from "./codex-native-web-search.js";
 import { resolveImageSanitizationLimits } from "./image-sanitization.js";
 import type { ModelAuthMode } from "./model-auth.js";
-import { createVoraTools } from "./vora-tools.js";
+import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
+import { createAgentsListTool } from "./tools/agents-list-tool.js";
+import { createCanvasTool } from "./tools/canvas-tool.js";
+import { createCronTool } from "./tools/cron-tool.js";
+import { createGatewayTool } from "./tools/gateway-tool.js";
+import { createImageGenerateTool } from "./tools/image-generate-tool.js";
+import { createImageTool } from "./tools/image-tool.js";
+import { createMessageTool } from "./tools/message-tool.js";
+import { createNodesTool } from "./tools/nodes-tool.js";
+import { createPdfTool } from "./tools/pdf-tool.js";
+import { createSessionStatusTool } from "./tools/session-status-tool.js";
+import { createSessionsHistoryTool } from "./tools/sessions-history-tool.js";
+import { createSessionsListTool } from "./tools/sessions-list-tool.js";
+import { createSessionsSendTool } from "./tools/sessions-send-tool.js";
+import { createSessionsSpawnTool } from "./tools/sessions-spawn-tool.js";
+import { createSessionsYieldTool } from "./tools/sessions-yield-tool.js";
+import { createSubagentsTool } from "./tools/subagents-tool.js";
+import { createTtsTool } from "./tools/tts-tool.js";
+import { createWebFetchTool, createWebSearchTool } from "./tools/web-tools.js";
 import { wrapToolWithAbortSignal } from "./vora-tools.abort.js";
 import { wrapToolWithBeforeToolCallHook } from "./vora-tools.before-tool-call.js";
 import {
@@ -46,7 +73,7 @@ import {
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./vora-tools.schema.js";
 import type { AnyAgentTool } from "./vora-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
-import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
+import { createToolFsPolicy, resolveToolFsConfig, type ToolFsPolicy } from "./tool-fs-policy.js";
 import {
   applyToolPolicyPipeline,
   buildDefaultToolPolicyPipelineSteps,
@@ -216,6 +243,217 @@ export const __testing = {
   assertRequiredParams,
   applyModelProviderToolPolicy,
 } as const;
+
+export function createVoraTools(options?: {
+  sandboxBrowserBridgeUrl?: string;
+  allowHostBrowserControl?: boolean;
+  agentSessionKey?: string;
+  agentChannel?: GatewayMessageChannel;
+  agentAccountId?: string;
+  agentTo?: string;
+  agentThreadId?: string | number;
+  agentGroupId?: string | null;
+  agentGroupChannel?: string | null;
+  agentGroupSpace?: string | null;
+  agentDir?: string;
+  sandboxRoot?: string;
+  sandboxFsBridge?: SandboxFsBridge;
+  fsPolicy?: ToolFsPolicy;
+  workspaceDir?: string;
+  spawnWorkspaceDir?: string;
+  sandboxed?: boolean;
+  config?: VoraConfig;
+  pluginToolAllowlist?: string[];
+  currentChannelId?: string;
+  currentThreadTs?: string;
+  currentMessageId?: string | number;
+  replyToMode?: "off" | "first" | "all";
+  hasRepliedRef?: { value: boolean };
+  modelHasVision?: boolean;
+  allowMediaInvokeCommands?: boolean;
+  requireExplicitMessageTarget?: boolean;
+  disableMessageTool?: boolean;
+  requesterAgentIdOverride?: string;
+  requesterSenderId?: string;
+  senderIsOwner?: boolean;
+  sessionId?: string;
+  onYield?: (message: string) => Promise<void> | void;
+  allowGatewaySubagentBinding?: boolean;
+}): AnyAgentTool[] {
+  const cfg = options?.config ?? loadConfig();
+  const requesterAgentId =
+    options?.requesterAgentIdOverride?.trim() ||
+    resolveSessionAgentId({
+      sessionKey: options?.agentSessionKey,
+      config: cfg,
+    });
+  const workspaceDir = resolveWorkspaceRoot(
+    options?.workspaceDir ?? resolveAgentWorkspaceDir(cfg, requesterAgentId),
+  );
+  const spawnWorkspaceDir = resolveWorkspaceRoot(options?.spawnWorkspaceDir ?? workspaceDir);
+  const explicitAgentDir = options?.agentDir?.trim();
+  const agentDir = explicitAgentDir || resolveAgentDir(cfg, requesterAgentId);
+  const sandboxMediaConfig =
+    options?.sandboxRoot && options?.sandboxFsBridge
+      ? { root: options.sandboxRoot, bridge: options.sandboxFsBridge }
+      : undefined;
+  const runtimeWebTools = getActiveRuntimeWebToolsMetadata();
+
+  const coreToolsRaw: Array<AnyAgentTool | null> = [
+    createAgentsListTool({
+      agentSessionKey: options?.agentSessionKey,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
+    }),
+    createCanvasTool({ config: cfg }),
+    createCronTool({ agentSessionKey: options?.agentSessionKey }),
+    createGatewayTool({
+      agentSessionKey: options?.agentSessionKey,
+      config: cfg,
+    }),
+    createImageTool({
+      config: cfg,
+      agentDir,
+      workspaceDir,
+      ...(sandboxMediaConfig ? { sandbox: sandboxMediaConfig } : {}),
+      fsPolicy: options?.fsPolicy,
+      modelHasVision: options?.modelHasVision,
+    }),
+    options?.disableMessageTool
+      ? null
+      : createMessageTool({
+          agentAccountId: options?.agentAccountId,
+          agentSessionKey: options?.agentSessionKey,
+          sessionId: options?.sessionId,
+          config: cfg,
+          currentChannelProvider: options?.agentChannel,
+          currentChannelId: options?.currentChannelId,
+          currentThreadTs: options?.currentThreadTs,
+          currentMessageId: options?.currentMessageId,
+          replyToMode: options?.replyToMode,
+          hasRepliedRef: options?.hasRepliedRef,
+          sandboxRoot: options?.sandboxRoot,
+          requireExplicitTarget: options?.requireExplicitMessageTarget,
+          requesterSenderId: options?.requesterSenderId,
+        }),
+    createNodesTool({
+      agentSessionKey: options?.agentSessionKey,
+      agentChannel: options?.agentChannel,
+      agentAccountId: options?.agentAccountId,
+      currentChannelId: options?.currentChannelId,
+      currentThreadTs: options?.currentThreadTs,
+      config: cfg,
+      modelHasVision: options?.modelHasVision,
+      allowMediaInvokeCommands: options?.allowMediaInvokeCommands,
+    }),
+    createPdfTool({
+      config: cfg,
+      agentDir,
+      workspaceDir,
+      ...(sandboxMediaConfig ? { sandbox: sandboxMediaConfig } : {}),
+      fsPolicy: options?.fsPolicy,
+    }),
+    createSessionStatusTool({
+      agentSessionKey: options?.agentSessionKey,
+      config: cfg,
+      sandboxed: options?.sandboxed,
+    }),
+    createSessionsHistoryTool({
+      agentSessionKey: options?.agentSessionKey,
+      sandboxed: options?.sandboxed,
+      config: cfg,
+    }),
+    createSessionsListTool({
+      agentSessionKey: options?.agentSessionKey,
+      sandboxed: options?.sandboxed,
+      config: cfg,
+    }),
+    createSessionsSendTool({
+      agentSessionKey: options?.agentSessionKey,
+      agentChannel: options?.agentChannel,
+      sandboxed: options?.sandboxed,
+      config: cfg,
+    }),
+    createSessionsSpawnTool({
+      agentSessionKey: options?.agentSessionKey,
+      agentChannel: options?.agentChannel,
+      agentAccountId: options?.agentAccountId,
+      agentTo: options?.agentTo,
+      agentThreadId: options?.agentThreadId,
+      sandboxed: options?.sandboxed,
+      requesterAgentIdOverride: options?.requesterAgentIdOverride,
+      agentGroupId: options?.agentGroupId,
+      agentGroupChannel: options?.agentGroupChannel,
+      agentGroupSpace: options?.agentGroupSpace,
+      workspaceDir: spawnWorkspaceDir,
+    }),
+    createSubagentsTool({
+      agentSessionKey: options?.agentSessionKey,
+    }),
+    createSessionsYieldTool({
+      sessionId: options?.sessionId,
+      onYield: options?.onYield,
+    }),
+    createTtsTool({
+      config: cfg,
+      agentChannel: options?.agentChannel,
+    }),
+    createWebFetchTool({
+      config: cfg,
+      sandboxed: options?.sandboxed,
+      runtimeFirecrawl: runtimeWebTools?.fetch.firecrawl,
+    }),
+    createWebSearchTool({
+      config: cfg,
+      sandboxed: options?.sandboxed,
+      runtimeWebSearch: runtimeWebTools?.search,
+    }),
+    createImageGenerateTool({
+      config: cfg,
+      agentDir,
+      workspaceDir,
+      ...(sandboxMediaConfig ? { sandbox: sandboxMediaConfig } : {}),
+      fsPolicy: options?.fsPolicy,
+    }),
+  ];
+  const coreTools = coreToolsRaw.filter((tool): tool is AnyAgentTool => Boolean(tool));
+
+  const deliveryContext =
+    options?.agentChannel || options?.agentTo || options?.agentAccountId || options?.agentThreadId
+      ? {
+          channel: options?.agentChannel,
+          to: options?.agentTo,
+          accountId: options?.agentAccountId,
+          threadId: options?.agentThreadId,
+        }
+      : undefined;
+
+  const pluginTools = resolvePluginTools({
+    context: {
+      config: cfg,
+      runtimeConfig: cfg,
+      workspaceDir,
+      agentDir,
+      agentId: requesterAgentId,
+      sessionKey: options?.agentSessionKey,
+      sessionId: options?.sessionId,
+      browser: {
+        sandboxBridgeUrl: options?.sandboxBrowserBridgeUrl,
+        allowHostControl: options?.allowHostBrowserControl !== false,
+      },
+      messageChannel: options?.agentChannel,
+      agentAccountId: options?.agentAccountId,
+      ...(deliveryContext ? { deliveryContext } : {}),
+      requesterSenderId: options?.requesterSenderId,
+      senderIsOwner: options?.senderIsOwner,
+      sandboxed: options?.sandboxed,
+    },
+    existingToolNames: new Set(coreTools.map((tool) => tool.name)),
+    toolAllowlist: options?.pluginToolAllowlist,
+    allowGatewaySubagentBinding: options?.allowGatewaySubagentBinding,
+  });
+
+  return [...coreTools, ...pluginTools];
+}
 
 export function createVoraCodingTools(options?: {
   agentId?: string;

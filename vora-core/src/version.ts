@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 
 declare const __VORA_VERSION__: string | undefined;
-const CORE_PACKAGE_NAME = "vora";
+const CORE_PACKAGE_NAMES = new Set(["vora", "vora-ai"]);
 
 const PACKAGE_JSON_CANDIDATES = [
   "../package.json",
@@ -30,8 +30,11 @@ function readVersionFromJsonCandidates(
         if (!version) {
           continue;
         }
-        if (opts.requirePackageName && parsed.name !== CORE_PACKAGE_NAME) {
-          continue;
+        if (opts.requirePackageName) {
+          const packageName = parsed.name?.trim().toLowerCase();
+          if (!packageName || !CORE_PACKAGE_NAMES.has(packageName)) {
+            continue;
+          }
         }
         return version;
       } catch {

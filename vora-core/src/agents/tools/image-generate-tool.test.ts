@@ -180,6 +180,46 @@ describe("createImageGenerateTool", () => {
     expect(createImageGenerateTool({ config: {} })).toBeNull();
   });
 
+  it("does not crash when runtime provider listing is unavailable", () => {
+    vi.spyOn(imageGenerationRuntime, "listRuntimeImageGenerationProviders").mockImplementation(
+      () => undefined as never,
+    );
+
+    expect(resolveImageGenerationModelConfigForTool({ cfg: {} })).toBeNull();
+    expect(createImageGenerateTool({ config: {} })).toBeNull();
+  });
+
+  it("returns an empty provider list when runtime listing is unavailable", async () => {
+    vi.spyOn(imageGenerationRuntime, "listRuntimeImageGenerationProviders").mockImplementation(
+      () => {
+        throw new Error("runtime unavailable");
+      },
+    );
+
+    const tool = createImageGenerateTool({
+      config: {
+        agents: {
+          defaults: {
+            imageGenerationModel: {
+              primary: "openai/gpt-image-1",
+            },
+          },
+        },
+      },
+    });
+
+    expect(tool).not.toBeNull();
+    if (!tool) {
+      throw new Error("expected image_generate tool");
+    }
+
+    const result = await tool.execute("call-list-unavailable", { action: "list" });
+    expect(result).toMatchObject({
+      content: [{ type: "text", text: "" }],
+      details: { providers: [] },
+    });
+  });
+
   it("matches image-generation providers across canonical provider aliases", () => {
     vi.spyOn(imageGenerationRuntime, "listRuntimeImageGenerationProviders").mockReturnValue([
       {

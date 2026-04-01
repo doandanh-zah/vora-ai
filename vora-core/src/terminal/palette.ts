@@ -1,12 +1,12 @@
-// Lobster palette tokens for CLI/UI theming. Use this palette for all CLI color output.
+// VORA ocean palette tokens for CLI/UI theming. Use this palette for all CLI color output.
 // Keep in sync with docs/cli/index.md (CLI palette section).
-export const LOBSTER_PALETTE = {
-  accent: "#FF5A2D",
-  accentBright: "#FF7A3D",
-  accentDim: "#D14A22",
-  info: "#FF8A5B",
+export const VORA_PALETTE = {
+  accent: "#1E90FF",
+  accentBright: "#55B4FF",
+  accentDim: "#136FBD",
+  info: "#83CBFF",
   success: "#2FBF71",
-  warn: "#FFB020",
+  warn: "#F59E0B",
   error: "#E23D2D",
-  muted: "#8B7F77",
+  muted: "#7B8794",
 } as const;

@@ -4,7 +4,7 @@
 // so runtime dependencies declared in dist/extensions/*/package.json must also
 // resolve from the package root node_modules after a global install.
 // This script is a no-op outside of a global npm install context.
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +14,9 @@ export const BUNDLED_PLUGIN_INSTALL_TARGETS = [];
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_EXTENSIONS_DIR = join(__dirname, "..", "dist", "extensions");
 const DEFAULT_PACKAGE_ROOT = join(__dirname, "..");
+const SKIP_POSTINSTALL_ENV = "VORA_SKIP_BUNDLED_PLUGIN_POSTINSTALL";
+const CHILD_POSTINSTALL_ENV = "VORA_BUNDLED_PLUGIN_POSTINSTALL_CHILD";
+const NESTED_INSTALL_TIMEOUT_MS = 2 * 60_000;
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
@@ -97,17 +100,24 @@ export function createNestedNpmInstallEnv(env = process.env) {
   const nextEnv = { ...env };
   delete nextEnv.npm_config_global;
   delete nextEnv.npm_config_prefix;
+  nextEnv[CHILD_POSTINSTALL_ENV] = "1";
   return nextEnv;
 }
 
 export function runBundledPluginPostinstall(params = {}) {
   const env = params.env ?? process.env;
+  if (env[SKIP_POSTINSTALL_ENV] === "1") {
+    return;
+  }
+  if (env[CHILD_POSTINSTALL_ENV] === "1") {
+    return;
+  }
   if (env.npm_config_global !== "true") {
     return;
   }
   const extensionsDir = params.extensionsDir ?? DEFAULT_EXTENSIONS_DIR;
   const packageRoot = params.packageRoot ?? DEFAULT_PACKAGE_ROOT;
-  const exec = params.execSync ?? execSync;
+  const spawn = params.spawnSync ?? spawnSync;
   const pathExists = params.existsSync ?? existsSync;
   const log = params.log ?? console;
   const runtimeDeps =
@@ -122,15 +132,32 @@ export function runBundledPluginPostinstall(params = {}) {
   }
 
   try {
-    exec(`npm install --omit=dev --no-save --package-lock=false ${missingSpecs.join(" ")}`, {
-      cwd: packageRoot,
-      env: createNestedNpmInstallEnv(env),
-      stdio: "pipe",
-    });
+    const result = spawn(
+      "npm",
+      ["install", "--omit=dev", "--no-save", "--package-lock=false", ...missingSpecs],
+      {
+        cwd: packageRoot,
+        env: createNestedNpmInstallEnv(env),
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: NESTED_INSTALL_TIMEOUT_MS,
+      },
+    );
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      const output = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+      throw new Error(output || `nested npm install failed with code ${String(result.status)}`);
+    }
     log.log(`[postinstall] installed bundled plugin deps: ${missingSpecs.join(", ")}`);
-  } catch (e) {
-    // Non-fatal: gateway will surface the missing dep via doctor.
-    log.warn(`[postinstall] could not install bundled plugin deps: ${String(e)}`);
+  } catch (error) {
+    // Non-fatal: gateway will surface missing deps via doctor/channel health checks.
+    const detail = error instanceof Error ? error.message : String(error);
+    log.warn(`[postinstall] could not install bundled plugin deps: ${detail}`);
+    log.warn(
+      `[postinstall] continuing without bundled plugin deps. Re-run install later, or set ${SKIP_POSTINSTALL_ENV}=1 to skip this hook explicitly.`,
+    );
   }
 }
 

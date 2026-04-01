@@ -323,7 +323,7 @@ export async function runConfigureWizard(
   runtime: RuntimeEnv = defaultRuntime,
 ) {
   try {
-    intro(opts.command === "update" ? "Vora update wizard" : "Vora configure");
+    intro(opts.command === "update" ? "VORA update wizard" : "VORA configure");
     const prompter = createClackPrompter();
 
     const snapshot = await readConfigFileSnapshot();

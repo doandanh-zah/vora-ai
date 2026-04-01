@@ -108,11 +108,9 @@ struct AboutSettings: View {
     }
 
     private var buildTimestamp: String? {
-        guard
-            let raw =
-            (Bundle.main.object(forInfoDictionaryKey: "VoraBuildTimestamp") as? String) ??
-            (Bundle.main.object(forInfoDictionaryKey: "VoraBuildTimestamp") as? String)
-        else { return nil }
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: "VoraBuildTimestamp") as? String else {
+            return nil
+        }
         let parser = ISO8601DateFormatter()
         parser.formatOptions = [.withInternetDateTime]
         guard let date = parser.date(from: raw) else { return raw }
@@ -125,9 +123,7 @@ struct AboutSettings: View {
     }
 
     private var gitCommit: String {
-        (Bundle.main.object(forInfoDictionaryKey: "VoraGitCommit") as? String) ??
-            (Bundle.main.object(forInfoDictionaryKey: "VoraGitCommit") as? String) ??
-            "unknown"
+        (Bundle.main.object(forInfoDictionaryKey: "VoraGitCommit") as? String) ?? "unknown"
     }
 
     private var bundleID: String {

@@ -61,7 +61,7 @@ export function createSyntaxTheme(
     type: chalk.hex("#4EC9B0"), // teal - types
     literal: chalk.hex("#569CD6"), // blue - true, false, null
     number: chalk.hex("#B5CEA8"), // green - numbers
-    string: chalk.hex("#CE9178"), // orange - strings
+    string: chalk.hex("#7DD3FC"), // sky blue - strings
     regexp: chalk.hex("#D16969"), // red - regex
     symbol: chalk.hex("#B5CEA8"), // green - symbols
     class: chalk.hex("#4EC9B0"), // teal - class names
@@ -72,7 +72,7 @@ export function createSyntaxTheme(
     doctag: chalk.hex("#608B4E"), // darker green - jsdoc tags
     meta: chalk.hex("#9CDCFE"), // light blue - meta/preprocessor
     "meta-keyword": chalk.hex("#C586C0"), // purple
-    "meta-string": chalk.hex("#CE9178"), // orange
+    "meta-string": chalk.hex("#7DD3FC"), // sky blue
     section: chalk.hex("#DCDCAA"), // yellow - sections
     tag: chalk.hex("#569CD6"), // blue - HTML/XML tags
     name: chalk.hex("#9CDCFE"), // light blue - tag names
@@ -80,7 +80,7 @@ export function createSyntaxTheme(
     attribute: chalk.hex("#9CDCFE"), // light blue - attributes
     variable: chalk.hex("#9CDCFE"), // light blue - variables
     bullet: chalk.hex("#D7BA7D"), // gold - list bullets in markdown
-    code: chalk.hex("#CE9178"), // orange - inline code
+    code: chalk.hex("#93C5FD"), // blue - inline code
     emphasis: chalk.italic, // italic
     strong: chalk.bold, // bold
     formula: chalk.hex("#C586C0"), // purple - math

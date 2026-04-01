@@ -165,8 +165,8 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
     `Vora docs: ${docsPath}`,
     "Mirror: https://docs.vora.ai",
     "Source: https://github.com/vora/vora",
-    "Community: https://discord.com/invite/clawd",
-    "Find new skills: https://clawhub.ai",
+    "Community: https://vora.ai",
+    "Find skills: https://docs.vora.ai/concepts/skills",
     "For Vora behavior, commands, config, or architecture: consult local docs first.",
     "When diagnosing issues, run `vora status` yourself when possible; only ask the user if you lack access (e.g., sandboxed).",
     "",
@@ -410,11 +410,12 @@ export function buildAgentSystemPrompt(params: {
 
   // For "none" mode, return just the basic identity line
   if (promptMode === "none") {
-    return "You are a personal assistant running inside Vora.";
+    return "You are VORA, a personal assistant running inside Vora. If asked who you are, identify as VORA.";
   }
 
   const lines = [
-    "You are a personal assistant running inside Vora.",
+    "You are VORA, a personal assistant running inside Vora.",
+    "If asked who you are, identify as VORA.",
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",

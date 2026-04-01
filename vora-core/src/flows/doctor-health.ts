@@ -22,7 +22,7 @@ export async function doctorCommand(
 ) {
   const prompter = createDoctorPrompter({ runtime, options });
   printWizardHeader(runtime);
-  intro("Vora doctor");
+  intro("VORA doctor");
 
   const root = await resolveVoraPackageRoot({
     moduleUrl: import.meta.url,

@@ -119,6 +119,9 @@ const buildMissingEntryErrorMessage = async () => {
     "Build locally with `pnpm install && pnpm build`, or install a built package instead.",
   );
   lines.push(
+    "If this came from a local .tgz, repack from `vora-core` with `npm pack` after build (avoid `--ignore-scripts`).",
+  );
+  lines.push(
     "For pinned GitHub installs, use `npm install -g github:vora/vora#<ref>` instead of a raw `/archive/<ref>.tar.gz` URL.",
   );
   lines.push("For releases, use `npm install -g vora@latest`.");

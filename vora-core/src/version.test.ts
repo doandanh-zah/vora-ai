@@ -54,6 +54,15 @@ describe("version resolution", () => {
     });
   });
 
+  it("accepts vora-ai package metadata for npm rebrand builds", async () => {
+    await withTempDir(async (root) => {
+      await writeJsonFixture(root, "package.json", { name: "vora-ai", version: "3.4.5" });
+      const moduleUrl = await ensureModuleFixture(root);
+      expect(readVersionFromPackageJsonForModuleUrl(moduleUrl)).toBe("3.4.5");
+      expect(resolveVersionFromModuleUrl(moduleUrl)).toBe("3.4.5");
+    });
+  });
+
   it("ignores unrelated nearby package.json files", async () => {
     await withTempDir(async (root) => {
       await writeJsonFixture(root, "package.json", { name: "vora", version: "2.3.4" });
@@ -83,7 +92,7 @@ describe("version resolution", () => {
     });
   });
 
-  it("ignores non-vora package and blank build-info versions", async () => {
+  it("ignores non-core package and blank build-info versions", async () => {
     await withTempDir(async (root) => {
       await writeJsonFixture(root, "package.json", { name: "other-package", version: "9.9.9" });
       await writeJsonFixture(root, "build-info.json", { version: "  " });

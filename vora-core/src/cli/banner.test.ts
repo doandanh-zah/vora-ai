@@ -21,7 +21,7 @@ describe("formatCliBannerLine", () => {
       richTty: false,
     });
 
-    expect(line).toBe("🦞 Vora 2026.3.7 (abc1234)");
+    expect(line).toBe("🌊 VORA 2026.3.7 (abc1234)");
   });
 
   it("uses default tagline when cli.banner.taglineMode is default", () => {
@@ -32,7 +32,7 @@ describe("formatCliBannerLine", () => {
       richTty: false,
     });
 
-    expect(line).toBe("🦞 Vora 2026.3.7 (abc1234) — All your chats, one Vora.");
+    expect(line).toBe("🌊 VORA 2026.3.7 (abc1234) — Voice-first AI agent for everyone.");
   });
 
   it("prefers explicit tagline mode over config", () => {
@@ -44,6 +44,6 @@ describe("formatCliBannerLine", () => {
       mode: "default",
     });
 
-    expect(line).toBe("🦞 Vora 2026.3.7 (abc1234) — All your chats, one Vora.");
+    expect(line).toBe("🌊 VORA 2026.3.7 (abc1234) — Voice-first AI agent for everyone.");
   });
 });

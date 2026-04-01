@@ -219,7 +219,7 @@ ${theme.muted("Docs:")} ${formatDocsLink("/cli/agent", "docs.vora.ai/cli/agent")
         `
 ${theme.heading("Examples:")}
 ${formatHelpExamples([
-  ['vora agents set-identity --agent main --name "Vora" --emoji "🦞"', "Set name + emoji."],
+  ['vora agents set-identity --agent main --name "VORA" --emoji "🌊"', "Set name + emoji."],
   ["vora agents set-identity --agent main --avatar avatars/vora.png", "Set avatar path."],
   [
     "vora agents set-identity --workspace ~/.vora/workspace --from-identity",

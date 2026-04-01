@@ -113,11 +113,22 @@ function getImageGenerationProviderAuthEnvVars(providerId: string): string[] {
   return getProviderEnvVars(providerId);
 }
 
+function listRuntimeImageGenerationProvidersSafe(
+  cfg: VoraConfig | undefined,
+): ImageGenerationProvider[] {
+  try {
+    const providers = listRuntimeImageGenerationProviders({ config: cfg });
+    return Array.isArray(providers) ? providers : [];
+  } catch {
+    return [];
+  }
+}
+
 function resolveImageGenerationModelCandidates(
   cfg: VoraConfig | undefined,
 ): Array<string | undefined> {
   const providerDefaults = new Map<string, string>();
-  for (const provider of listRuntimeImageGenerationProviders({ config: cfg })) {
+  for (const provider of listRuntimeImageGenerationProvidersSafe(cfg)) {
     const providerId = provider.id.trim();
     const modelId = provider.defaultModel?.trim();
     if (!providerId || !modelId || providerDefaults.has(providerId)) {
@@ -249,7 +260,7 @@ function resolveSelectedImageGenerationProvider(params: {
     return undefined;
   }
   const selectedProvider = normalizeProviderId(selectedRef.provider);
-  return listRuntimeImageGenerationProviders({ config: params.config }).find(
+  return listRuntimeImageGenerationProvidersSafe(params.config).find(
     (provider) =>
       normalizeProviderId(provider.id) === selectedProvider ||
       (provider.aliases ?? []).some((alias) => normalizeProviderId(alias) === selectedProvider),
@@ -500,7 +511,7 @@ export function createImageGenerateTool(options?: {
       const params = args as Record<string, unknown>;
       const action = resolveAction(params);
       if (action === "list") {
-        const providers = listRuntimeImageGenerationProviders({ config: effectiveCfg }).map(
+        const providers = listRuntimeImageGenerationProvidersSafe(effectiveCfg).map(
           (provider) => ({
             id: provider.id,
             ...(provider.label ? { label: provider.label } : {}),
