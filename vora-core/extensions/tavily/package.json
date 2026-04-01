@@ -1,0 +1,12 @@
+{
+  "name": "@vora/tavily-plugin",
+  "version": "2026.4.1",
+  "private": true,
+  "description": "Vora Tavily plugin",
+  "type": "module",
+  "vora": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

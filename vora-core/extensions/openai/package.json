@@ -1,0 +1,12 @@
+{
+  "name": "@vora/openai-provider",
+  "version": "2026.4.1",
+  "private": true,
+  "description": "Vora OpenAI provider plugins",
+  "type": "module",
+  "vora": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
