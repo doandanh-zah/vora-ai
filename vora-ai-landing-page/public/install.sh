@@ -1969,7 +1969,7 @@ resolve_package_install_spec() {
     local lc_value
     lc_value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
     if [[ "$lc_value" == "main" ]]; then
-        echo "github:vora/vora#main"
+        echo "github:vora-ai/vora-core#main"
         return 0
     fi
     if is_explicit_package_install_spec "$value"; then
@@ -1984,14 +1984,14 @@ resolve_package_install_spec() {
 }
 
 install_vora() {
-    local package_name="vora"
+    local package_name="vora-ai"
     if [[ "$USE_BETA" == "1" ]]; then
         local beta_version=""
         beta_version="$(resolve_beta_version || true)"
         if [[ -n "$beta_version" ]]; then
             VORA_VERSION="$beta_version"
             ui_info "Beta tag detected (${beta_version})"
-            package_name="vora"
+            package_name="vora-ai"
         else
             VORA_VERSION="latest"
             ui_info "No beta tag found; using latest"
@@ -2022,9 +2022,9 @@ install_vora() {
 
     if [[ "${VORA_VERSION}" == "latest" && "${package_name}" == "vora" ]]; then
         if ! resolve_vora_bin &> /dev/null; then
-            ui_warn "npm install vora@latest failed; retrying vora@next"
+            ui_warn "npm install vora-ai@latest failed; retrying vora-ai@next"
             cleanup_npm_vora_paths
-            install_vora_npm "vora@next"
+            install_vora_npm "vora-ai@next"
         fi
     fi
 

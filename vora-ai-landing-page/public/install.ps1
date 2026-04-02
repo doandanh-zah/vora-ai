@@ -276,15 +276,15 @@ function Resolve-PackageInstallSpec {
 
     $trimmed = $Target.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
-        return "vora@latest"
+        return "vora-ai@latest"
     }
     if ($trimmed.ToLowerInvariant() -eq "main") {
-        return "github:vora/vora#main"
+        return "github:vora-ai/vora-core#main"
     }
     if (Test-ExplicitPackageInstallSpec -Target $trimmed) {
         return $trimmed
     }
-    return "vora@$trimmed"
+    return "vora-ai@$trimmed"
 }
 
 function Add-ToPath {
