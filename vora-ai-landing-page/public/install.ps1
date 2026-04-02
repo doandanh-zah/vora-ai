@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Colors
-$ACCENT = "`e[38;2;255;77;77m"    # coral-bright
+$ACCENT = "`e[38;2;0;153;255m"    # coral-bright
 $SUCCESS = "`e[38;2;0;229;204m"    # cyan-bright
 $WARN = "`e[38;2;255;176;32m"     # amber
 $ERROR = "`e[38;2;230;57;70m"     # coral-mid
@@ -34,7 +34,7 @@ function Write-Host {
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "${ACCENT}  🦞 Vora Installer$NC" -Level info
+    Write-Host "${ACCENT}  🌊 Vora Installer$NC" -Level info
     Write-Host "${MUTED}  All your chats, one Vora.$NC" -Level info
     Write-Host ""
 }
@@ -359,7 +359,7 @@ function Main {
     }
     
     Write-Host ""
-    Write-Host "🦞 Vora installed successfully!" -Level success
+    Write-Host "🌊 Vora installed successfully!" -Level success
 }
 
 Main

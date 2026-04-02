@@ -5,9 +5,9 @@ set -euo pipefail
 # Usage: curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash
 
 BOLD='\033[1m'
-ACCENT='\033[38;2;255;77;77m'       # coral-bright  #ff4d4d
+ACCENT='\033[38;2;0;153;255m'       # coral-bright  #ff4d4d
 # shellcheck disable=SC2034
-ACCENT_BRIGHT='\033[38;2;255;110;110m' # lighter coral
+ACCENT_BRIGHT='\033[38;2;102;178;255m' # lighter coral
 INFO='\033[38;2;136;146;176m'       # text-secondary #8892b0
 SUCCESS='\033[38;2;0;229;204m'      # cyan-bright   #00e5cc
 WARN='\033[38;2;255;176;32m'        # amber (no site equiv, keep warm)
@@ -236,7 +236,7 @@ print_gum_status() {
 print_installer_banner() {
     if [[ -n "$GUM" ]]; then
         local title tagline hint card
-        title="$("$GUM" style --foreground "#ff4d4d" --bold "🦞 Vora Installer")"
+        title="$("$GUM" style --foreground "#ff4d4d" --bold "🌊 Vora Installer")"
         tagline="$("$GUM" style --foreground "#8892b0" "$TAGLINE")"
         hint="$("$GUM" style --foreground "#5a6480" "modern installer mode")"
         card="$(printf '%s\n%s\n%s' "$title" "$tagline" "$hint")"
@@ -246,7 +246,7 @@ print_installer_banner() {
     fi
 
     echo -e "${ACCENT}${BOLD}"
-    echo "  🦞 Vora Installer"
+    echo "  🌊 Vora Installer"
     echo -e "${NC}${INFO}  ${TAGLINE}${NC}"
     echo ""
 }
