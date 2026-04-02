@@ -115,6 +115,16 @@ describe("resolveVoraPackageRoot", () => {
 
   it.each([
     {
+      name: "resolves package root for npm package name vora-ai",
+      setup: () => {
+        const project = fx("npm-vora-ai");
+        const argv1 = path.join(project, "node_modules", ".bin", "vora");
+        const pkgRoot = path.join(project, "node_modules", "vora");
+        setPackageRoot(pkgRoot, "vora-ai");
+        return { opts: { argv1 }, expected: pkgRoot };
+      },
+    },
+    {
       name: "resolves package root from .bin argv1",
       setup: () => {
         const project = fx("bin-scenario");
