@@ -110,7 +110,7 @@ vora --version
 ## 5) Cai 1 version cu the
 
 ```bash
-npm i -g vora-ai@0.1.1
+npm i -g vora-ai@0.1.2
 vora --version
 ```
 
@@ -142,14 +142,14 @@ vora --version
 ### macOS / Linux / WSL
 
 ```bash
-npm i -g --force /path/to/vora-ai-0.1.1.tgz
+npm i -g --force /path/to/vora-ai-0.1.2.tgz
 vora --version
 ```
 
 ### Windows PowerShell
 
 ```powershell
-npm i -g --force "C:\path\to\vora-ai-0.1.1.tgz"
+npm i -g --force "C:\path\to\vora-ai-0.1.2.tgz"
 vora --version
 ```
 
