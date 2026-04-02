@@ -35,7 +35,7 @@ function Write-Host {
 function Write-Banner {
     Write-Host ""
     Write-Host "${ACCENT}  🌊 Vora Installer$NC" -Level info
-    Write-Host "${MUTED}  All your chats, one Vora.$NC" -Level info
+    Write-Host "${MUTED}  `"Hey Vora`" - The voice-first AI agent powered by Agora.$NC" -Level info
     Write-Host ""
 }
 
