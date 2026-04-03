@@ -318,6 +318,20 @@ export async function applyNonInteractiveAuthChoice(params: {
       mode: "api_key",
     });
     nextConfig = applyPrimaryModel(nextConfig, `ollama/${modelId}`);
+
+    // Reduce bootstrap limits for embedded mode to prevent timeout
+    nextConfig = {
+      ...nextConfig,
+      agents: {
+        ...nextConfig.agents,
+        defaults: {
+          ...nextConfig.agents?.defaults,
+          bootstrapMaxChars: 1500,
+          bootstrapTotalMaxChars: 4000,
+        },
+      },
+    };
+
     return nextConfig;
   }
 
@@ -421,6 +435,9 @@ export async function applyNonInteractiveAuthChoice(params: {
         defaults: {
           ...nextConfig.agents?.defaults,
           thinkingDefault: "off",
+          // Reduce bootstrap limits for embedded mode to prevent timeout
+          bootstrapMaxChars: 1500,
+          bootstrapTotalMaxChars: 4000,
         },
       },
       tools: {
