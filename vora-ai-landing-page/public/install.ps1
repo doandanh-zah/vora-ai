@@ -360,6 +360,10 @@ function Main {
     
     Write-ColorHost ""
     Write-ColorHost "🌊 Vora installed successfully!" -Level success
+    Write-ColorHost ""
+    Write-ColorHost "IMPORTANT: Please open a NEW PowerShell window and run:" -Level warn
+    Write-ColorHost "  vora --version" -Level info
+    Write-ColorHost ""
 }
 
 Main
