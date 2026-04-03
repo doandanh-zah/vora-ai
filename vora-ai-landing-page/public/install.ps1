@@ -21,7 +21,7 @@ $ERROR_COLOR = "`e[38;2;230;57;70m"     # coral-mid
 $MUTED = "`e[38;2;90;100;128m"    # text-muted
 $NC = "`e[0m"                     # No Color
 
-function Write-Host {
+function Write-ColorHost {
     param([string]$Message, [string]$Level = "info")
     $msg = switch ($Level) {
         "success" { "$SUCCESS✓$NC $Message" }
@@ -29,14 +29,14 @@ function Write-Host {
         "error" { "$ERROR_COLOR✗$NC $Message" }
         default { "$MUTED·$NC $Message" }
     }
-    Microsoft.PowerShell.Host\Write-Host $msg
+    Microsoft.PowerShell.Utility\Write-Host $msg
 }
 
 function Write-Banner {
-    Write-Host ""
-    Write-Host "${ACCENT}  🌊 Vora Installer$NC" -Level info
-    Write-Host "${MUTED}  `"Hey Vora`" - The voice-first AI agent powered by Agora.$NC" -Level info
-    Write-Host ""
+    Write-ColorHost ""
+    Write-ColorHost "${ACCENT}  🌊 Vora Installer$NC" -Level info
+    Write-ColorHost "${MUTED}  `"Hey Vora`" - The voice-first AI agent powered by Agora.$NC" -Level info
+    Write-ColorHost ""
 }
 
 function Get-ExecutionPolicyStatus {
@@ -56,23 +56,23 @@ function Test-Admin {
 function Ensure-ExecutionPolicy {
     $status = Get-ExecutionPolicyStatus
     if ($status.Blocked) {
-        Write-Host "PowerShell execution policy is set to: $($status.Policy)" -Level warn
-        Write-Host "This prevents scripts like npm.ps1 from running." -Level warn
-        Write-Host ""
+        Write-ColorHost "PowerShell execution policy is set to: $($status.Policy)" -Level warn
+        Write-ColorHost "This prevents scripts like npm.ps1 from running." -Level warn
+        Write-ColorHost ""
         
         # Try to set execution policy for current process
         try {
             Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -ErrorAction Stop
-            Write-Host "Set execution policy to RemoteSigned for current process" -Level success
+            Write-ColorHost "Set execution policy to RemoteSigned for current process" -Level success
             return $true
         } catch {
-            Write-Host "Could not automatically set execution policy" -Level error
-            Write-Host ""
-            Write-Host "To fix this, run:" -Level info
-            Write-Host "  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process" -Level info
-            Write-Host ""
-            Write-Host "Or run PowerShell as Administrator and execute:" -Level info
-            Write-Host "  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine" -Level info
+            Write-ColorHost "Could not automatically set execution policy" -Level error
+            Write-ColorHost ""
+            Write-ColorHost "To fix this, run:" -Level info
+            Write-ColorHost "  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process" -Level info
+            Write-ColorHost ""
+            Write-ColorHost "Or run PowerShell as Administrator and execute:" -Level info
+            Write-ColorHost "  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine" -Level info
             return $false
         }
     }
@@ -100,51 +100,51 @@ function Get-NpmVersion {
 }
 
 function Install-Node {
-    Write-Host "Node.js not found" -Level info
-    Write-Host "Installing Node.js..." -Level info
+    Write-ColorHost "Node.js not found" -Level info
+    Write-ColorHost "Installing Node.js..." -Level info
     
     # Try winget first
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "  Using winget..." -Level info
+        Write-ColorHost "  Using winget..." -Level info
         try {
             winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
             # Refresh PATH
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-Host "  Node.js installed via winget" -Level success
+            Write-ColorHost "  Node.js installed via winget" -Level success
             return $true
         } catch {
-            Write-Host "  Winget install failed: $_" -Level warn
+            Write-ColorHost "  Winget install failed: $_" -Level warn
         }
     }
     
     # Try chocolatey
     if (Get-Command choco -ErrorAction SilentlyContinue) {
-        Write-Host "  Using chocolatey..." -Level info
+        Write-ColorHost "  Using chocolatey..." -Level info
         try {
             choco install nodejs-lts -y 2>&1 | Out-Null
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-Host "  Node.js installed via chocolatey" -Level success
+            Write-ColorHost "  Node.js installed via chocolatey" -Level success
             return $true
         } catch {
-            Write-Host "  Chocolatey install failed: $_" -Level warn
+            Write-ColorHost "  Chocolatey install failed: $_" -Level warn
         }
     }
     
     # Try scoop
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        Write-Host "  Using scoop..." -Level info
+        Write-ColorHost "  Using scoop..." -Level info
         try {
             scoop install nodejs-lts 2>&1 | Out-Null
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-Host "  Node.js installed via scoop" -Level success
+            Write-ColorHost "  Node.js installed via scoop" -Level success
             return $true
         } catch {
-            Write-Host "  Scoop install failed: $_" -Level warn
+            Write-ColorHost "  Scoop install failed: $_" -Level warn
         }
     }
     
-    Write-Host "Could not install Node.js automatically" -Level error
-    Write-Host "Please install Node.js 22+ manually from: https://nodejs.org" -Level info
+    Write-ColorHost "Could not install Node.js automatically" -Level error
+    Write-ColorHost "Please install Node.js 22+ manually from: https://nodejs.org" -Level info
     return $false
 }
 
@@ -153,10 +153,10 @@ function Ensure-Node {
     if ($nodeVersion) {
         $major = [int]($nodeVersion -split '\.')[0]
         if ($major -ge 22) {
-            Write-Host "Node.js v$nodeVersion found" -Level success
+            Write-ColorHost "Node.js v$nodeVersion found" -Level success
             return $true
         }
-        Write-Host "Node.js v$nodeVersion found, but need v22+" -Level warn
+        Write-ColorHost "Node.js v$nodeVersion found, but need v22+" -Level warn
     }
     return Install-Node
 }
@@ -172,28 +172,28 @@ function Get-GitVersion {
 }
 
 function Install-Git {
-    Write-Host "Git not found" -Level info
+    Write-ColorHost "Git not found" -Level info
     
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host "  Installing Git via winget..." -Level info
+        Write-ColorHost "  Installing Git via winget..." -Level info
         try {
             winget install Git.Git --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            Write-Host "  Git installed" -Level success
+            Write-ColorHost "  Git installed" -Level success
             return $true
         } catch {
-            Write-Host "  Winget install failed" -Level warn
+            Write-ColorHost "  Winget install failed" -Level warn
         }
     }
     
-    Write-Host "Please install Git for Windows from: https://git-scm.com" -Level error
+    Write-ColorHost "Please install Git for Windows from: https://git-scm.com" -Level error
     return $false
 }
 
 function Ensure-Git {
     $gitVersion = Get-GitVersion
     if ($gitVersion) {
-        Write-Host "$gitVersion found" -Level success
+        Write-ColorHost "$gitVersion found" -Level success
         return $true
     }
     return Install-Git
@@ -204,15 +204,15 @@ function Install-VoraNpm {
 
     $installSpec = Resolve-PackageInstallSpec -Target $Target
     
-    Write-Host "Installing Vora ($installSpec)..." -Level info
+    Write-ColorHost "Installing Vora ($installSpec)..." -Level info
     
     try {
         # Use -ExecutionPolicy Bypass to handle restricted execution policy
         npm install -g $installSpec --no-fund --no-audit 2>&1
-        Write-Host "Vora installed" -Level success
+        Write-ColorHost "Vora installed" -Level success
         return $true
     } catch {
-        Write-Host "npm install failed: $_" -Level error
+        Write-ColorHost "npm install failed: $_" -Level error
         return $false
     }
 }
@@ -220,28 +220,28 @@ function Install-VoraNpm {
 function Install-VoraGit {
     param([string]$RepoDir, [switch]$Update)
     
-    Write-Host "Installing Vora from git..." -Level info
+    Write-ColorHost "Installing Vora from git..." -Level info
     
     if (!(Test-Path $RepoDir)) {
-        Write-Host "  Cloning repository..." -Level info
+        Write-ColorHost "  Cloning repository..." -Level info
         git clone https://github.com/vora/vora.git $RepoDir 2>&1
     } elseif ($Update) {
-        Write-Host "  Updating repository..." -Level info
+        Write-ColorHost "  Updating repository..." -Level info
         git -C $RepoDir pull --rebase 2>&1
     }
     
     # Install pnpm if not present
     if (!(Get-Command pnpm -ErrorAction SilentlyContinue)) {
-        Write-Host "  Installing pnpm..." -Level info
+        Write-ColorHost "  Installing pnpm..." -Level info
         npm install -g pnpm 2>&1
     }
     
     # Install dependencies
-    Write-Host "  Installing dependencies..." -Level info
+    Write-ColorHost "  Installing dependencies..." -Level info
     pnpm install --dir $RepoDir 2>&1
     
     # Build
-    Write-Host "  Building..." -Level info
+    Write-ColorHost "  Building..." -Level info
     pnpm --dir $RepoDir build 2>&1
     
     # Create wrapper
@@ -255,7 +255,7 @@ function Install-VoraGit {
 node "%~dp0..\vora\dist\entry.js" %*
 "@ | Out-File -FilePath "$wrapperDir\vora.cmd" -Encoding ASCII -Force
     
-    Write-Host "Vora installed" -Level success
+    Write-ColorHost "Vora installed" -Level success
     return $true
 }
 
@@ -293,7 +293,7 @@ function Add-ToPath {
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($currentPath -notlike "*$Path*") {
         [Environment]::SetEnvironmentVariable("Path", "$currentPath;$Path", "User")
-        Write-Host "Added $Path to user PATH" -Level info
+        Write-ColorHost "Added $Path to user PATH" -Level info
     }
 }
 
@@ -301,12 +301,12 @@ function Add-ToPath {
 function Main {
     Write-Banner
     
-    Write-Host "Windows detected" -Level success
+    Write-ColorHost "Windows detected" -Level success
     
     # Check and handle execution policy FIRST, before any npm calls
     if (!(Ensure-ExecutionPolicy)) {
-        Write-Host ""
-        Write-Host "Installation cannot continue due to execution policy restrictions" -Level error
+        Write-ColorHost ""
+        Write-ColorHost "Installation cannot continue due to execution policy restrictions" -Level error
         exit 1
     }
     
@@ -320,18 +320,18 @@ function Main {
         }
         
         if ($DryRun) {
-            Write-Host "[DRY RUN] Would install Vora from git to $GitDir" -Level info
+            Write-ColorHost "[DRY RUN] Would install Vora from git to $GitDir" -Level info
         } else {
             Install-VoraGit -RepoDir $GitDir -Update:(-not $NoGitUpdate)
         }
     } else {
         # npm method
         if (!(Ensure-Git)) {
-            Write-Host "Git is required for npm installs. Please install Git and try again." -Level warn
+            Write-ColorHost "Git is required for npm installs. Please install Git and try again." -Level warn
         }
         
         if ($DryRun) {
-            Write-Host "[DRY RUN] Would install Vora via npm ($((Resolve-PackageInstallSpec -Target $Tag)))" -Level info
+            Write-ColorHost "[DRY RUN] Would install Vora via npm ($((Resolve-PackageInstallSpec -Target $Tag)))" -Level info
         } else {
             if (!(Install-VoraNpm -Target $Tag)) {
                 exit 1
@@ -348,18 +348,18 @@ function Main {
     } catch { }
     
     if (!$NoOnboard -and !$DryRun) {
-        Write-Host ""
-        Write-Host "Starting onboarding process..." -Level info
+        Write-ColorHost ""
+        Write-ColorHost "Starting onboarding process..." -Level info
         
         try {
             & vora onboard
         } catch {
-            Write-Host "Failed to start onboard automatically. Run 'vora onboard' to complete setup" -Level error
+            Write-ColorHost "Failed to start onboard automatically. Run 'vora onboard' to complete setup" -Level error
         }
     }
     
-    Write-Host ""
-    Write-Host "🌊 Vora installed successfully!" -Level success
+    Write-ColorHost ""
+    Write-ColorHost "🌊 Vora installed successfully!" -Level success
 }
 
 Main
