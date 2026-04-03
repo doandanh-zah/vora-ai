@@ -110,7 +110,8 @@ describe("Windows startup fallback", () => {
       const startupEntryPath = resolveStartupEntryPath(env);
       const startupScript = await fs.readFile(startupEntryPath, "utf8");
       expect(result.scriptPath).toBe(resolveTaskScriptPath(env));
-      expect(startupScript).toContain('start "" /min cmd.exe /d /c');
+      expect(startupScript).toContain("powershell -NoProfile -WindowStyle Hidden -Command");
+      expect(startupScript).toContain("Start-Process -WindowStyle Hidden -FilePath 'cmd.exe'");
       expect(startupScript).toContain("gateway.cmd");
       expect(spawn).toHaveBeenCalledWith(
         "cmd.exe",

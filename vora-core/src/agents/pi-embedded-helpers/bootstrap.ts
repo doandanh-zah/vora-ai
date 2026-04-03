@@ -102,7 +102,7 @@ export function resolveBootstrapMaxChars(cfg?: VoraConfig, provider?: string): n
     return Math.floor(raw);
   }
   if (provider === "groq") {
-    return 4_000;
+    return 1_800;
   }
   return DEFAULT_BOOTSTRAP_MAX_CHARS;
 }
@@ -113,7 +113,7 @@ export function resolveBootstrapTotalMaxChars(cfg?: VoraConfig, provider?: strin
     return Math.floor(raw);
   }
   if (provider === "groq") {
-    return 12_000;
+    return 5_000;
   }
   return DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS;
 }

@@ -92,6 +92,10 @@ function quoteSchtasksArg(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
 }
 
+function quotePowerShellSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function resolveTaskUser(env: GatewayServiceEnv): string | null {
   const username = env.USERNAME || env.USER || env.LOGNAME;
   if (!username) {
@@ -273,7 +277,15 @@ function buildStartupLauncherScript(params: { description?: string; scriptPath: 
     assertNoCmdLineBreak(trimmedDescription, "Startup launcher description");
     lines.push(`rem ${trimmedDescription}`);
   }
-  lines.push(`start "" /min cmd.exe /d /c ${quoteCmdScriptArg(params.scriptPath)}`);
+  const cmdScriptPathArg = quoteCmdScriptArg(params.scriptPath);
+  const startProcessCommand = [
+    "Start-Process -WindowStyle Hidden -FilePath 'cmd.exe' -ArgumentList",
+    "'/d','/s','/c',",
+    quotePowerShellSingleQuoted(cmdScriptPathArg),
+  ].join(" ");
+  lines.push(
+    `powershell -NoProfile -WindowStyle Hidden -Command ${quoteCmdScriptArg(startProcessCommand)}`,
+  );
   return `${lines.join("\r\n")}\r\n`;
 }
 
@@ -605,7 +617,7 @@ async function activateScheduledTask(params: {
   ];
   const taskUser = resolveTaskUser(params.env);
   let create = await execSchtasks(
-    taskUser ? [...baseArgs, "/RU", taskUser, "/NP", "/IT"] : baseArgs,
+    taskUser ? [...baseArgs, "/RU", taskUser, "/NP"] : baseArgs,
   );
   if (create.code !== 0 && taskUser) {
     create = await execSchtasks(baseArgs);

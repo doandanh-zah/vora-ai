@@ -199,10 +199,31 @@ function Ensure-Git {
     return Install-Git
 }
 
+function Test-InstallSpecRequiresGit {
+    param([string]$InstallSpec)
+
+    if ([string]::IsNullOrWhiteSpace($InstallSpec)) {
+        return $false
+    }
+
+    return $InstallSpec.StartsWith("github:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $InstallSpec.StartsWith("git+ssh:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $InstallSpec.StartsWith("git+https:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $InstallSpec.StartsWith("git+http:", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $InstallSpec.StartsWith("git+file:", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Install-VoraNpm {
     param([string]$Target = "latest")
 
     $installSpec = Resolve-PackageInstallSpec -Target $Target
+
+    if (Test-InstallSpecRequiresGit -InstallSpec $installSpec) {
+        if (!(Ensure-Git)) {
+            Write-Host "This install target requires Git. Install Git and retry." -Level error
+            return $false
+        }
+    }
     
     Write-Host "Installing Vora ($installSpec)..." -Level info
     
@@ -326,10 +347,6 @@ function Main {
         }
     } else {
         # npm method
-        if (!(Ensure-Git)) {
-            Write-Host "Git is required for npm installs. Please install Git and try again." -Level warn
-        }
-        
         if ($DryRun) {
             Write-Host "[DRY RUN] Would install Vora via npm ($((Resolve-PackageInstallSpec -Target $Tag)))" -Level info
         } else {

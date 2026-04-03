@@ -11,6 +11,7 @@ import { applyAuthChoiceApiProviders } from "./auth-choice.apply.api-providers.j
 function createPrompter(params: {
   text?: string[];
   select?: string[];
+  confirm?: boolean[];
 }) {
   const text = vi.fn();
   for (const value of params.text ?? []) {
@@ -20,6 +21,13 @@ function createPrompter(params: {
   for (const value of params.select ?? []) {
     select.mockResolvedValueOnce(value);
   }
+  const confirm = vi.fn();
+  for (const value of params.confirm ?? []) {
+    confirm.mockResolvedValueOnce(value);
+  }
+  if ((params.confirm ?? []).length === 0) {
+    confirm.mockResolvedValue(true);
+  }
   const note = vi.fn(async () => {});
   return {
     intro: vi.fn(async () => {}),
@@ -28,7 +36,7 @@ function createPrompter(params: {
     select,
     multiselect: vi.fn(async () => []),
     text,
-    confirm: vi.fn(async () => true),
+    confirm,
     progress: vi.fn(() => ({
       update: vi.fn(),
       stop: vi.fn(),
@@ -135,5 +143,82 @@ describe("applyAuthChoiceApiProviders", () => {
       'Default model set to ollama/llama3.2 for agent "worker".',
       "Model configured",
     );
+  });
+
+  it("applies Groq quota-saving defaults during onboarding", async () => {
+    const prompter = createPrompter({});
+
+    const result = await applyAuthChoiceApiProviders({
+      authChoice: "groq",
+      config: {
+        agents: { defaults: {} },
+        tools: { profile: "coding" },
+      } as VoraConfig,
+      prompter: prompter as never,
+      runtime: {} as never,
+      setDefaultModel: true,
+      agentDir: "/tmp/vora-test-agent",
+      opts: {
+        groqApiKey: "gsk_test",
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.config.models?.providers?.groq).toMatchObject({
+      baseUrl: "https://api.groq.com/openai/v1",
+      api: "openai-responses",
+      models: [
+        expect.objectContaining({
+          id: "llama-3.1-8b-instant",
+          contextWindow: 16000,
+          maxTokens: 512,
+          reasoning: false,
+        }),
+      ],
+    });
+    expect(result?.config.tools?.profile).toBe("minimal");
+    expect(result?.config.agents?.defaults?.thinkingDefault).toBe("off");
+    expect(result?.config.agents?.defaults?.reasoningDefault).toBe("off");
+    expect(result?.config.agents?.defaults?.model).toEqual({
+      primary: "groq/llama-3.1-8b-instant",
+    });
+    expect(upsertAuthProfile).toHaveBeenCalledWith({
+      profileId: "groq:default",
+      credential: {
+        type: "api_key",
+        provider: "groq",
+        key: "gsk_test",
+      },
+      agentDir: "/tmp/vora-test-agent",
+    });
+  });
+
+  it("preserves explicit non-coding tool profile and thinking defaults for Groq", async () => {
+    const prompter = createPrompter({});
+
+    const result = await applyAuthChoiceApiProviders({
+      authChoice: "groq-api-key",
+      config: {
+        agents: {
+          defaults: {
+            thinkingDefault: "minimal",
+            reasoningDefault: "stream",
+          },
+        },
+        tools: { profile: "full" },
+      } as VoraConfig,
+      prompter: prompter as never,
+      runtime: {} as never,
+      setDefaultModel: false,
+      agentDir: "/tmp/vora-test-agent",
+      opts: {
+        groqApiKey: "gsk_test_2",
+      },
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.config.tools?.profile).toBe("full");
+    expect(result?.config.agents?.defaults?.thinkingDefault).toBe("minimal");
+    expect(result?.config.agents?.defaults?.reasoningDefault).toBe("stream");
   });
 });

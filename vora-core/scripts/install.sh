@@ -1947,6 +1947,11 @@ is_explicit_package_install_spec() {
     [[ "$value" == *"://"* || "$value" == *"#"* || "$value" =~ ^(file|github|git\+ssh|git\+https|git\+http|git\+file|npm): ]]
 }
 
+npm_install_spec_requires_git() {
+    local value="${1:-}"
+    [[ "$value" =~ ^(github:|git\+ssh:|git\+https:|git\+http:|git\+file:) ]]
+}
+
 can_resolve_registry_package_version() {
     local value="${1:-}"
     if [[ -z "$value" ]]; then
@@ -2013,6 +2018,11 @@ install_vora() {
     fi
     local install_spec=""
     install_spec="$(resolve_package_install_spec "${package_name}" "${VORA_VERSION}")"
+    if npm_install_spec_requires_git "${install_spec}"; then
+        if ! check_git; then
+            install_git
+        fi
+    fi
 
     if ! install_vora_npm "${install_spec}"; then
         ui_warn "npm install failed; retrying"
@@ -2354,15 +2364,10 @@ main() {
             ui_success "git wrapper removed"
         fi
 
-        # Step 3: Git (required for npm installs that may fetch from git or apply patches)
-        if ! check_git; then
-            install_git
-        fi
-
-        # Step 4: npm permissions (Linux)
+        # Step 3: npm permissions (Linux)
         fix_npm_permissions
 
-        # Step 5: Vora
+        # Step 4: Vora
         install_vora
     fi
 
@@ -2495,14 +2500,6 @@ main() {
         if [[ "$NO_ONBOARD" == "1" || "$skip_onboard" == "true" ]]; then
             ui_info "Skipping onboard (requested); run vora onboard later"
         else
-            local config_path="${VORA_CONFIG_PATH:-$HOME/.vora/vora.json}"
-            if [[ -f "${config_path}" || -f "$HOME/.vora/vora.json" ]]; then
-                ui_info "Config already present; running doctor"
-                run_doctor
-                should_open_dashboard=true
-                ui_info "Config already present; skipping onboarding"
-                skip_onboard=true
-            fi
             ui_info "Starting setup"
             echo ""
             if [[ -r /dev/tty && -w /dev/tty ]]; then

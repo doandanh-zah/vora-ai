@@ -382,42 +382,36 @@ async function applyAuthChoiceOllama(
     return null;
   }
 
-  // NEW FLOW: Ask if user has Ollama installed
   const hasOllama = await params.prompter.confirm({
-    message: "🤖 Do you have Ollama installed on this computer yet?",
+    message: "Do you already have Ollama installed on this desktop?",
     initialValue: false,
   });
 
   if (!hasOllama) {
-    // Ask about platform
     const platform = await params.prompter.select({
-      message: "💻 What operating system are you using?",
+      message: "Are you using macOS/Linux or Windows?",
       options: [
-        { value: "mac", label: "macOS", hint: "Apple Mac computers" },
-        { value: "linux", label: "Linux", hint: "Ubuntu, Debian, etc." },
-        { value: "windows", label: "Windows", hint: "Windows 10/11" },
+        { value: "mac-linux", label: "macOS/Linux", hint: "Auto-install supported" },
+        { value: "windows", label: "Windows", hint: "Manual install required" },
       ],
     });
 
-    if (platform === "mac" || platform === "linux") {
+    if (platform === "mac-linux") {
       await params.prompter.note(
         [
-          "🚀 Installing Ollama automatically...",
-          "",
           "Running: curl -fsSL https://ollama.ai/install.sh | sh",
-          "Please wait for installation to complete...",
+          "Installing Ollama automatically. Please wait...",
         ].join("\n"),
         "Installing Ollama",
       );
 
       try {
         const installResult = spawnSync(
-          "curl",
-          ["-fsSL", "https://ollama.ai/install.sh", "|", "sh"],
+          "sh",
+          ["-c", "curl -fsSL https://ollama.ai/install.sh | sh"],
           {
             encoding: "utf8",
             stdio: "pipe",
-            shell: true,
           },
         );
 
@@ -427,21 +421,18 @@ async function applyAuthChoiceOllama(
 
         await params.prompter.note(
           [
-            "✅ Ollama installed successfully!",
-            "",
-            "🚀 Starting Ollama server...",
-            "Please run this in a NEW terminal:",
+            "Ollama installed successfully.",
+            "Run this in a new terminal:",
             "ollama serve",
             "",
-            "💡 Keep Ollama running while using VORA.",
+            "Keep Ollama running while using VORA.",
           ].join("\n"),
           "Ollama Ready",
         );
       } catch (error) {
         await params.prompter.note(
           [
-            "❌ Auto-installation failed.",
-            "",
+            "Automatic install failed.",
             "Please install manually:",
             "curl -fsSL https://ollama.ai/install.sh | sh",
             "",
@@ -454,15 +445,12 @@ async function applyAuthChoiceOllama(
     } else if (platform === "windows") {
       await params.prompter.note(
         [
-          "🪟 For Windows, please install Ollama manually:",
-          "",
-          "1. Visit: https://ollama.ai/download",
+          "For Windows, install Ollama manually:",
+          "1. Open https://ollama.ai/download",
           "2. Download and run the Windows installer",
-          "3. After installation, run: ollama serve",
+          "3. Start Ollama: ollama serve",
           "",
-          "💡 Keep Ollama running in a separate terminal while using VORA.",
-          "",
-          "🚀 Once Ollama is installed and running, restart this setup.",
+          "After Ollama is running, start onboarding again.",
         ].join("\n"),
         "Windows Installation Required",
       );
@@ -470,37 +458,12 @@ async function applyAuthChoiceOllama(
     }
   }
 
-  // Check if Ollama is actually running
-  let discoveredModels: string[] = [];
-  try {
-    discoveredModels = await discoverOllamaModelIds(OLLAMA_DEFAULT_BASE_URL);
-  } catch (error) {
-    await params.prompter.note(
-      [
-        "❌ Cannot connect to Ollama server.",
-        "",
-        "Please make sure Ollama is running:",
-        "ollama serve",
-        "",
-        `Error: ${error instanceof Error ? error.message : String(error)}`,
-      ].join("\n"),
-      "Ollama Not Running",
-    );
-    return null;
-  }
-
   await params.prompter.note(
     [
-      "🦙 Ollama runs fully local on this machine - 100% FREE!",
-      "",
-      "✅ Ollama is installed and running.",
-      "",
-      "💡 Popular free models:",
-      "- llama3.2 (3B/8B) - Fast & capable",
-      "- qwen2.5 (7B/14B) - Great for coding",
-      "- deepseek-coder (6.7B) - Specialized for code",
+      "Ollama runs fully local on this machine.",
+      "If needed, start it first with: ollama serve",
     ].join("\n"),
-    "Ollama Ready",
+    "Ollama",
   );
 
   const baseUrlInput = await params.prompter.text({
@@ -523,11 +486,6 @@ async function applyAuthChoiceOllama(
     baseUrl,
   });
   const defaultModel = `ollama/${modelId}`;
-
-  // Auto-pull model if not available locally
-  if (discoveredModels.length === 0 || !discoveredModels.includes(modelId)) {
-    await autoPullModel(params.prompter, modelId);
-  }
 
   const resolvedAgentId =
     params.agentId ?? resolveDefaultAgentId(params.config);
@@ -558,16 +516,9 @@ async function applyAuthChoiceOllama(
   // Final instructions for starting Ollama
   await params.prompter.note(
     [
-      "🎉 Almost ready!",
-      "",
-      "📝 Final step - Start Ollama server:",
-      "Open a NEW terminal window and run:",
+      "Final step: keep Ollama running in another terminal.",
+      "Command:",
       "ollama serve",
-      "",
-      "💡 Keep this terminal open while using VORA.",
-      "Ollama needs to stay running in the background.",
-      "",
-      "✅ Then you can start using VORA with Ollama!",
     ].join("\n"),
     "Final Setup",
   );
@@ -619,16 +570,15 @@ async function applyAuthChoiceGroq(
 
   await params.prompter.note(
     [
-      "⚡ Groq provides blazing fast inference for free.",
+      "Groq free tier is fast but quota-limited.",
       "",
-      "🚨 QUOTA WARNING:",
-      "- Free tier: 30 requests/minute",
-      "- Daily limit applies",
-      "- For testing only, not production",
+      "VORA will apply quota-saving defaults for Groq:",
+      "- model: llama-3.1-8b-instant",
+      "- low output token cap",
+      "- tools profile: minimal",
+      "- thinking default: off",
       "",
-      "💡 Get your API key at: https://console.groq.com/keys",
-      "",
-      "📝 To save quota, use Ollama (FREE unlimited) instead!",
+      "Get your API key at: https://console.groq.com/keys",
     ].join("\n"),
     "Groq API",
   );
@@ -645,7 +595,6 @@ async function applyAuthChoiceGroq(
     ).trim();
   }
 
-  // Use smaller, more efficient model to save quota
   const defaultModel = "groq/llama-3.1-8b-instant";
   const resolvedAgentId =
     params.agentId ?? resolveDefaultAgentId(params.config);
@@ -670,7 +619,6 @@ async function applyAuthChoiceGroq(
     ? existingProvider.models
     : [];
 
-  // Use model with lower cost and better quota efficiency
   const modelDefinition: ModelDefinitionConfig = {
     id: "llama-3.1-8b-instant",
     name: "llama-3.1-8b-instant",
@@ -678,8 +626,8 @@ async function applyAuthChoiceGroq(
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096, // Reduced from 8192 to save quota
+    contextWindow: 16_000,
+    maxTokens: 512,
   };
 
   const nextModels = [
@@ -688,9 +636,26 @@ async function applyAuthChoiceGroq(
   ];
 
   const DEFAULT_BASE_URL = "https://api.groq.com/openai/v1";
+  const currentToolProfile = params.config.tools?.profile;
+  const resolvedToolProfile =
+    currentToolProfile && currentToolProfile !== "coding"
+      ? currentToolProfile
+      : "minimal";
 
   let nextConfig = {
     ...params.config,
+    agents: {
+      ...params.config.agents,
+      defaults: {
+        ...params.config.agents?.defaults,
+        thinkingDefault: params.config.agents?.defaults?.thinkingDefault ?? "off",
+        reasoningDefault: params.config.agents?.defaults?.reasoningDefault ?? "off",
+      },
+    },
+    tools: {
+      ...params.config.tools,
+      profile: resolvedToolProfile,
+    },
     models: {
       ...params.config.models,
       providers: {
