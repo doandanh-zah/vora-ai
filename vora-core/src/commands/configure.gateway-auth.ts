@@ -110,6 +110,7 @@ export async function promptAuthConfig(
   });
 
   let next = cfg;
+  let skipModelSelection = false;
   const preferredProvider =
     authChoice === "skip"
       ? undefined
@@ -129,6 +130,7 @@ export async function promptAuthConfig(
       setDefaultModel: true,
     });
     next = applied.config;
+    skipModelSelection = applied.skipModelSelection === true;
   } else {
     const modelSelection = await promptDefaultModel({
       config: next,
@@ -148,7 +150,7 @@ export async function promptAuthConfig(
     }
   }
 
-  if (authChoice !== "custom-api-key") {
+  if (authChoice !== "custom-api-key" && !skipModelSelection) {
     const modelAllowlist = resolveProviderChoiceModelAllowlist({
       authChoice,
       config: next,

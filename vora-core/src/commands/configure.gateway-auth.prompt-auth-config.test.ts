@@ -175,4 +175,17 @@ describe("promptAuthConfig", () => {
       }),
     );
   });
+
+  it("skips follow-up model pickers when auth flow requests model-selection skip", async () => {
+    mocks.promptAuthChoiceGrouped.mockResolvedValue("ollama");
+    mocks.applyAuthChoice.mockResolvedValue({ config: {}, skipModelSelection: true });
+    mocks.promptModelAllowlist.mockResolvedValue({ models: undefined });
+    const defaultModelCallsBefore = mocks.promptDefaultModel.mock.calls.length;
+    const allowlistCallsBefore = mocks.promptModelAllowlist.mock.calls.length;
+
+    await promptAuthConfig({}, makeRuntime(), noopPrompter);
+
+    expect(mocks.promptDefaultModel.mock.calls.length).toBe(defaultModelCallsBefore);
+    expect(mocks.promptModelAllowlist.mock.calls.length).toBe(allowlistCallsBefore);
+  });
 });

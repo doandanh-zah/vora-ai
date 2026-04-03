@@ -132,4 +132,56 @@ describe("applyNonInteractiveAuthChoice", () => {
       agentDir: "/tmp/vora-test-agent",
     });
   });
+
+  it("configures Groq defaults in non-interactive mode", async () => {
+    const runtime = createRuntime();
+    const nextConfig = {
+      agents: { defaults: {} },
+      tools: { profile: "coding" },
+    } as VoraConfig;
+    resolveNonInteractiveApiKey.mockResolvedValueOnce({
+      key: "gsk_test_value",
+      source: "flag",
+    });
+
+    const result = await applyNonInteractiveAuthChoice({
+      nextConfig,
+      authChoice: "groq-api-key",
+      opts: {
+        groqApiKey: "gsk_test_value",
+      } as never,
+      runtime: runtime as never,
+      baseConfig: nextConfig,
+    });
+
+    expect(result?.agents?.defaults?.model).toEqual({
+      primary: "groq/llama-3.1-8b-instant",
+    });
+    expect(result?.agents?.defaults?.thinkingDefault).toBe("off");
+    expect(result?.tools?.profile).toBe("minimal");
+    expect(result?.models?.providers?.groq).toMatchObject({
+      baseUrl: "https://api.groq.com/openai/v1",
+      api: "openai-responses",
+      models: [expect.objectContaining({ id: "llama-3.1-8b-instant", maxTokens: 512 })],
+    });
+    expect(result?.auth?.profiles?.["groq:default"]).toEqual({
+      provider: "groq",
+      mode: "api_key",
+    });
+    expect(upsertAuthProfile).toHaveBeenCalledWith({
+      profileId: "groq:default",
+      credential: {
+        type: "api_key",
+        provider: "groq",
+        key: "gsk_test_value",
+      },
+      agentDir: "/tmp/vora-test-agent",
+    });
+    expect(resolveNonInteractiveApiKey).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "groq",
+        flagName: "--groq-api-key",
+      }),
+    );
+  });
 });

@@ -2,9 +2,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VoraConfig } from "../config/config.js";
 
 const upsertAuthProfile = vi.hoisted(() => vi.fn());
+const spawnSyncMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    status: 1,
+    stderr: "mocked spawnSync failure",
+  })),
+);
 vi.mock("../agents/auth-profiles.js", () => ({
   upsertAuthProfile,
 }));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawnSync: spawnSyncMock,
+  };
+});
 
 import { applyAuthChoiceApiProviders } from "./auth-choice.apply.api-providers.js";
 
@@ -115,6 +128,7 @@ describe("applyAuthChoiceApiProviders", () => {
     );
     const prompter = createPrompter({
       text: ["http://127.0.0.1:11434", "llama3.2"],
+      confirm: [true, false],
     });
 
     const result = await applyAuthChoiceApiProviders({
@@ -143,6 +157,31 @@ describe("applyAuthChoiceApiProviders", () => {
       'Default model set to ollama/llama3.2 for agent "worker".',
       "Model configured",
     );
+  });
+
+  it("stops model selection flow when Windows Ollama install is not ready", async () => {
+    const prompter = createPrompter({
+      confirm: [false],
+      select: ["windows"],
+    });
+
+    const result = await applyAuthChoiceApiProviders({
+      authChoice: "ollama",
+      config: { agents: { defaults: {} } } as VoraConfig,
+      prompter: prompter as never,
+      runtime: {} as never,
+      setDefaultModel: true,
+      agentDir: "/tmp/vora-test-agent",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.config).toEqual({ agents: { defaults: {} } });
+    expect(result?.skipModelSelection).toBe(true);
+    expect(prompter.note).toHaveBeenCalledWith(
+      expect.stringContaining("For Windows, install Ollama manually:"),
+      "Windows Installation Required",
+    );
+    expect(upsertAuthProfile).not.toHaveBeenCalled();
   });
 
   it("applies Groq quota-saving defaults during onboarding", async () => {

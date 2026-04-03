@@ -1,6 +1,6 @@
 import type { AuthChoice, OnboardOptions } from "./onboard-types.js";
 
-type OnboardCoreAuthOptionKey = keyof Pick<OnboardOptions, "litellmApiKey">;
+type OnboardCoreAuthOptionKey = keyof Pick<OnboardOptions, "groqApiKey">;
 
 export type OnboardCoreAuthFlag = {
   optionKey: OnboardCoreAuthOptionKey;
@@ -10,4 +10,12 @@ export type OnboardCoreAuthFlag = {
   description: string;
 };
 
-export const CORE_ONBOARD_AUTH_FLAGS: ReadonlyArray<OnboardCoreAuthFlag> = [];
+export const CORE_ONBOARD_AUTH_FLAGS: ReadonlyArray<OnboardCoreAuthFlag> = [
+  {
+    optionKey: "groqApiKey",
+    authChoice: "groq-api-key",
+    cliFlag: "--groq-api-key",
+    cliOption: "--groq-api-key <key>",
+    description: "Groq API key",
+  },
+];

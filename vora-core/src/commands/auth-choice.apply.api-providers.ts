@@ -41,6 +41,82 @@ function checkOllamaInstalled(): boolean {
   }
 }
 
+function isLikelyLocalOllamaBaseUrl(baseUrl: string): boolean {
+  try {
+    const parsed = new URL(baseUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return false;
+    }
+    const host = parsed.hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+async function tryStartOllamaServeInBackground(params: {
+  prompter: ApplyAuthChoiceParams["prompter"];
+  baseUrl: string;
+}): Promise<boolean> {
+  if (!isLikelyLocalOllamaBaseUrl(params.baseUrl)) {
+    return false;
+  }
+  if (!checkOllamaInstalled()) {
+    return false;
+  }
+
+  await params.prompter.note(
+    [
+      "Could not reach Ollama API yet.",
+      "Trying to start Ollama automatically in the background: ollama serve",
+    ].join("\n"),
+    "Ollama",
+  );
+
+  const startResult =
+    process.platform === "win32"
+      ? spawnSync(
+          "powershell",
+          [
+            "-NoProfile",
+            "-Command",
+            "Start-Process -FilePath ollama -ArgumentList 'serve' -WindowStyle Hidden",
+          ],
+          { encoding: "utf8", stdio: "pipe" },
+        )
+      : spawnSync("sh", ["-c", "nohup ollama serve >/dev/null 2>&1 &"], {
+          encoding: "utf8",
+          stdio: "pipe",
+        });
+
+  if (startResult.status !== 0) {
+    return false;
+  }
+
+  const tagsUrl = new URL("/api/tags", `${params.baseUrl}/`).toString();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const response = await fetchWithTimeout(
+        tagsUrl,
+        { method: "GET" },
+        Math.max(1500, Math.floor(OLLAMA_DISCOVERY_TIMEOUT_MS / 6)),
+      );
+      if (response.ok) {
+        await params.prompter.note(
+          "Ollama API is now reachable.",
+          "Ollama",
+        );
+        return true;
+      }
+    } catch {
+      // Keep polling until timeout.
+    }
+  }
+
+  return false;
+}
+
 async function autoInstallOllama(
   prompter: ApplyAuthChoiceParams["prompter"],
 ): Promise<boolean> {
@@ -312,17 +388,33 @@ async function promptOllamaModelId(params: {
   baseUrl: string;
 }): Promise<string> {
   let discoveredModels: string[] = [];
+  let discoveryFailed = false;
   try {
     discoveredModels = await discoverOllamaModelIds(params.baseUrl);
   } catch (error) {
+    discoveryFailed = true;
     await params.prompter.note(
       [
         `Could not query ${params.baseUrl}/api/tags.`,
         error instanceof Error ? error.message : String(error),
-        "Run `ollama serve` first, or enter a model name manually.",
+        "Trying to start Ollama automatically, then retrying once.",
       ].join("\n"),
       "Ollama",
     );
+  }
+
+  if (discoveryFailed) {
+    const started = await tryStartOllamaServeInBackground({
+      prompter: params.prompter,
+      baseUrl: params.baseUrl,
+    });
+    if (started) {
+      try {
+        discoveredModels = await discoverOllamaModelIds(params.baseUrl);
+      } catch {
+        // Leave discovered models empty and continue with manual fallback.
+      }
+    }
   }
 
   if (discoveredModels.length > 0) {
@@ -346,6 +438,10 @@ async function promptOllamaModelId(params: {
       return String(choice);
     }
   } else {
+    const pulledDefault = await autoPullModel(params.prompter, "llama3.2");
+    if (pulledDefault) {
+      return "llama3.2";
+    }
     await params.prompter.note(
       [
         "🤖 No local Ollama models detected yet.",
@@ -440,7 +536,7 @@ async function applyAuthChoiceOllama(
           ].join("\n"),
           "Installation Failed",
         );
-        return null;
+        return { config: params.config, skipModelSelection: true };
       }
     } else if (platform === "windows") {
       await params.prompter.note(
@@ -454,7 +550,7 @@ async function applyAuthChoiceOllama(
         ].join("\n"),
         "Windows Installation Required",
       );
-      return null;
+      return { config: params.config, skipModelSelection: true };
     }
   }
 

@@ -23,6 +23,7 @@ export type ApplyAuthChoiceParams = {
 export type ApplyAuthChoiceResult = {
   config: VoraConfig;
   agentModelOverride?: string;
+  skipModelSelection?: boolean;
 };
 
 export async function applyAuthChoice(

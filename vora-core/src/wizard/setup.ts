@@ -503,6 +503,7 @@ export async function runSetupWizard(
       config: nextConfig,
       workspaceDir,
     }));
+  let skipModelSelection = false;
 
   if (authChoice === "custom-api-key") {
     const customResult = await promptCustomApiConfig({
@@ -525,6 +526,7 @@ export async function runSetupWizard(
       },
     });
     nextConfig = authResult.config;
+    skipModelSelection = authResult.skipModelSelection === true;
 
     if (authResult.agentModelOverride) {
       nextConfig = applyPrimaryModel(nextConfig, authResult.agentModelOverride);
@@ -542,6 +544,7 @@ export async function runSetupWizard(
         });
   const shouldPromptModelSelection =
     authChoice !== "custom-api-key" &&
+    !skipModelSelection &&
     (authChoiceFromPrompt || authChoiceModelSelectionPolicy?.promptWhenAuthChoiceProvided === true);
   if (shouldPromptModelSelection) {
     const modelSelection = await promptDefaultModel({

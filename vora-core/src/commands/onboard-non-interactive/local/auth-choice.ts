@@ -1,8 +1,15 @@
-import { resolveAgentDir, resolveDefaultAgentId } from "../../../agents/agent-scope.js";
+import {
+  resolveAgentDir,
+  resolveDefaultAgentId,
+} from "../../../agents/agent-scope.js";
 import { upsertAuthProfile } from "../../../agents/auth-profiles.js";
 import type { ApiKeyCredential } from "../../../agents/auth-profiles/types.js";
 import { OLLAMA_LOCAL_AUTH_MARKER } from "../../../agents/model-auth-markers.js";
 import type { VoraConfig } from "../../../config/config.js";
+import type {
+  ModelDefinitionConfig,
+  ModelProviderConfig,
+} from "../../../config/types.models.js";
 import type { SecretInput } from "../../../config/types.secrets.js";
 import { resolveManifestDeprecatedProviderAuthChoice } from "../../../plugins/provider-auth-choices.js";
 import { applyAuthProfileConfig } from "../../../plugins/provider-auth-helpers.js";
@@ -51,13 +58,17 @@ export async function applyNonInteractiveAuthChoice(params: {
     env: process.env,
   });
   let nextConfig = params.nextConfig;
-  const requestedSecretInputMode = normalizeSecretInputModeInput(opts.secretInputMode);
+  const requestedSecretInputMode = normalizeSecretInputModeInput(
+    opts.secretInputMode,
+  );
   if (opts.secretInputMode && !requestedSecretInputMode) {
     runtime.error('Invalid --secret-input-mode. Use "plaintext" or "ref".');
     runtime.exit(1);
     return null;
   }
-  const toStoredSecretInput = (resolved: ResolvedNonInteractiveApiKey): SecretInput | null => {
+  const toStoredSecretInput = (
+    resolved: ResolvedNonInteractiveApiKey,
+  ): SecretInput | null => {
     const storePlaintextSecret = requestedSecretInputMode !== "ref"; // pragma: allowlist secret
     if (storePlaintextSecret) {
       return resolved.key;
@@ -83,7 +94,9 @@ export async function applyNonInteractiveAuthChoice(params: {
       id: resolved.envVarName,
     };
   };
-  const resolveApiKey = (input: Parameters<typeof resolveNonInteractiveApiKey>[0]) =>
+  const resolveApiKey = (
+    input: Parameters<typeof resolveNonInteractiveApiKey>[0],
+  ) =>
     resolveNonInteractiveApiKey({
       ...input,
       secretInputMode: requestedSecretInputMode,
@@ -94,7 +107,8 @@ export async function applyNonInteractiveAuthChoice(params: {
     email?: string;
     metadata?: Record<string, string>;
   }): ApiKeyCredential | null => {
-    const storeSecretRef = requestedSecretInputMode === "ref" && params.resolved.source === "env"; // pragma: allowlist secret
+    const storeSecretRef =
+      requestedSecretInputMode === "ref" && params.resolved.source === "env"; // pragma: allowlist secret
     if (storeSecretRef) {
       if (!params.resolved.envVarName) {
         runtime.error(
@@ -128,7 +142,9 @@ export async function applyNonInteractiveAuthChoice(params: {
       ...(params.metadata ? { metadata: params.metadata } : {}),
     };
   };
-  if (isDeprecatedAuthChoice(authChoice, { config: nextConfig, env: process.env })) {
+  if (
+    isDeprecatedAuthChoice(authChoice, { config: nextConfig, env: process.env })
+  ) {
     runtime.error(
       formatDeprecatedNonInteractiveAuthChoiceError(authChoice, {
         config: nextConfig,
@@ -168,10 +184,13 @@ export async function applyNonInteractiveAuthChoice(params: {
     return pluginProviderChoice;
   }
 
-  const deprecatedChoice = resolveManifestDeprecatedProviderAuthChoice(authChoice as string, {
-    config: nextConfig,
-    env: process.env,
-  });
+  const deprecatedChoice = resolveManifestDeprecatedProviderAuthChoice(
+    authChoice as string,
+    {
+      config: nextConfig,
+      env: process.env,
+    },
+  );
   if (deprecatedChoice) {
     runtime.error(
       `"${authChoice as string}" is no longer supported. Use --auth-choice ${deprecatedChoice.choiceId} instead.`,
@@ -253,7 +272,9 @@ export async function applyNonInteractiveAuthChoice(params: {
   }
 
   if (authChoice === "ollama") {
-    const baseUrl = normalizeOllamaBaseUrl(opts.customBaseUrl ?? OLLAMA_DEFAULT_BASE_URL);
+    const baseUrl = normalizeOllamaBaseUrl(
+      opts.customBaseUrl ?? OLLAMA_DEFAULT_BASE_URL,
+    );
     let modelId = opts.customModelId?.trim();
     if (!modelId) {
       try {
@@ -297,6 +318,117 @@ export async function applyNonInteractiveAuthChoice(params: {
       mode: "api_key",
     });
     nextConfig = applyPrimaryModel(nextConfig, `ollama/${modelId}`);
+    return nextConfig;
+  }
+
+  if (authChoice === "groq-api-key") {
+    const resolved = await resolveApiKey({
+      provider: "groq",
+      cfg: baseConfig,
+      flagValue: opts.groqApiKey ?? opts.token,
+      flagName: "--groq-api-key",
+      envVar: "GROQ_API_KEY",
+      envVarName: "GROQ_API_KEY",
+      runtime,
+    });
+    if (!resolved) {
+      return null;
+    }
+
+    const credential = toApiKeyCredential({
+      provider: "groq",
+      resolved,
+    });
+    if (!credential) {
+      return null;
+    }
+
+    const resolvedAgentId = resolveDefaultAgentId(nextConfig);
+    const agentDir = resolveAgentDir(nextConfig, resolvedAgentId, process.env);
+    upsertAuthProfile({
+      profileId: "groq:default",
+      credential,
+      agentDir,
+    });
+
+    const defaultModel = "groq/llama-3.1-8b-instant";
+    const modelDefinition: ModelDefinitionConfig = {
+      id: "llama-3.1-8b-instant",
+      name: "llama-3.1-8b-instant",
+      api: "openai-responses",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 16_000,
+      maxTokens: 512,
+    };
+
+    const existingProvider = nextConfig.models?.providers?.groq as
+      | ModelProviderConfig
+      | undefined;
+    const existingModels = Array.isArray(existingProvider?.models)
+      ? existingProvider.models
+      : [];
+    const nextModels = [
+      modelDefinition,
+      ...existingModels.filter((entry) => entry?.id !== modelDefinition.id),
+    ];
+    const currentToolProfile = nextConfig.tools?.profile;
+    const resolvedToolProfile =
+      currentToolProfile && currentToolProfile !== "coding"
+        ? currentToolProfile
+        : "minimal";
+
+    nextConfig = {
+      ...nextConfig,
+      agents: {
+        ...nextConfig.agents,
+        defaults: {
+          ...nextConfig.agents?.defaults,
+          thinkingDefault:
+            nextConfig.agents?.defaults?.thinkingDefault ?? "off",
+        },
+      },
+      tools: {
+        ...nextConfig.tools,
+        profile: resolvedToolProfile,
+      },
+      models: {
+        ...nextConfig.models,
+        providers: {
+          ...nextConfig.models?.providers,
+          groq: {
+            ...existingProvider,
+            baseUrl: "https://api.groq.com/openai/v1",
+            api: "openai-responses",
+            models: nextModels,
+          },
+        },
+      },
+    };
+    nextConfig = applyAuthProfileConfig(nextConfig, {
+      profileId: "groq:default",
+      provider: "groq",
+      mode: "api_key",
+    });
+    nextConfig = applyPrimaryModel(nextConfig, defaultModel);
+
+    // Apply quota-saving defaults for Groq
+    nextConfig = {
+      ...nextConfig,
+      agents: {
+        ...nextConfig.agents,
+        defaults: {
+          ...nextConfig.agents?.defaults,
+          thinkingDefault: "off",
+        },
+      },
+      tools: {
+        ...nextConfig.tools,
+        profile: "minimal",
+      },
+    };
+
     return nextConfig;
   }
 
