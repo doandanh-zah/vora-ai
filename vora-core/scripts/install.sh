@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # Vora Installer for macOS and Linux
-# Usage: curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash
+# Usage: curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash
 
 BOLD='\033[1m'
-ACCENT='\033[38;2;255;77;77m'       # coral-bright  #ff4d4d
+ACCENT='\033[38;2;0;153;255m'       # coral-bright  #ff4d4d
 # shellcheck disable=SC2034
-ACCENT_BRIGHT='\033[38;2;255;110;110m' # lighter coral
+ACCENT_BRIGHT='\033[38;2;102;178;255m' # lighter coral
 INFO='\033[38;2;136;146;176m'       # text-secondary #8892b0
 SUCCESS='\033[38;2;0;229;204m'      # cyan-bright   #00e5cc
 WARN='\033[38;2;255;176;32m'        # amber (no site equiv, keep warm)
@@ -15,7 +15,7 @@ ERROR='\033[38;2;230;57;70m'        # coral-mid     #e63946
 MUTED='\033[38;2;90;100;128m'       # text-muted    #5a6480
 NC='\033[0m' # No Color
 
-DEFAULT_TAGLINE="All your chats, one Vora."
+DEFAULT_TAGLINE="\"Hey Vora\" — The voice-first AI agent powered by Agora."
 NODE_DEFAULT_MAJOR=24
 NODE_MIN_MAJOR=22
 NODE_MIN_MINOR=14
@@ -236,7 +236,7 @@ print_gum_status() {
 print_installer_banner() {
     if [[ -n "$GUM" ]]; then
         local title tagline hint card
-        title="$("$GUM" style --foreground "#ff4d4d" --bold "🦞 Vora Installer")"
+        title="$("$GUM" style --foreground "#ff4d4d" --bold "🌊 Vora Installer")"
         tagline="$("$GUM" style --foreground "#8892b0" "$TAGLINE")"
         hint="$("$GUM" style --foreground "#5a6480" "modern installer mode")"
         card="$(printf '%s\n%s\n%s' "$title" "$tagline" "$hint")"
@@ -246,7 +246,7 @@ print_installer_banner() {
     fi
 
     echo -e "${ACCENT}${BOLD}"
-    echo "  🦞 Vora Installer"
+    echo "  🌊 Vora Installer"
     echo -e "${NC}${INFO}  ${TAGLINE}${NC}"
     echo ""
 }
@@ -262,7 +262,7 @@ detect_os_or_die() {
     if [[ "$OS" == "unknown" ]]; then
         ui_error "Unsupported operating system"
         echo "This installer supports macOS and Linux (including WSL)."
-        echo "For Windows, use: iwr -useb https://vora.ai/install.ps1 | iex"
+        echo "For Windows, use: iwr -useb https://heyvora.fun/install.ps1 | iex"
         exit 1
     fi
 
@@ -374,7 +374,7 @@ show_install_plan() {
 }
 
 show_footer_links() {
-    local faq_url="https://docs.vora.ai/start/faq"
+    local faq_url="https://docs.heyvora.fun/start/faq"
     if [[ -n "$GUM" ]]; then
         local content
         content="$(printf '%s\n%s' "Need help?" "FAQ: ${faq_url}")"
@@ -840,7 +840,7 @@ install_vora_npm() {
 }
 
 TAGLINES=()
-TAGLINES+=("Your terminal just grew claws—type something and let the bot pinch the busywork.")
+TAGLINES+=("Your terminal just picked up a reliable copilot for the boring work.")
 TAGLINES+=("Welcome to the command line: where dreams compile and confidence segfaults.")
 TAGLINES+=("I run on caffeine, JSON5, and the audacity of \"it worked on my machine.\"")
 TAGLINES+=("Gateway online—please keep hands, feet, and appendages inside the shell at all times.")
@@ -857,7 +857,7 @@ TAGLINES+=("I can grep it, git blame it, and gently roast it—pick your coping 
 TAGLINES+=("Hot reload for config, cold sweat for deploys.")
 TAGLINES+=("I'm the assistant your terminal demanded, not the one your sleep schedule requested.")
 TAGLINES+=("I keep secrets like a vault... unless you print them in debug logs again.")
-TAGLINES+=("Automation with claws: minimal fuss, maximal pinch.")
+TAGLINES+=("Automation with focus: minimal fuss, maximum output.")
 TAGLINES+=("I'm basically a Swiss Army knife, but with more opinions and fewer sharp edges.")
 TAGLINES+=("If you're lost, run doctor; if you're brave, run prod; if you're wise, run tests.")
 TAGLINES+=("Your task has been queued; your dignity has been deprecated.")
@@ -876,39 +876,39 @@ TAGLINES+=("If you can describe it, I can probably automate it—or at least mak
 TAGLINES+=("Your config is valid, your assumptions are not.")
 TAGLINES+=("I don't just autocomplete—I auto-commit (emotionally), then ask you to review (logically).")
 TAGLINES+=("Less clicking, more shipping, fewer \"where did that file go\" moments.")
-TAGLINES+=("Claws out, commit in—let's ship something mildly responsible.")
-TAGLINES+=("I'll butter your workflow like a lobster roll: messy, delicious, effective.")
-TAGLINES+=("Shell yeah—I'm here to pinch the toil and leave you the glory.")
+TAGLINES+=("Flow state on, commit in—let's ship something responsible.")
+TAGLINES+=("I'll smooth your workflow: fewer clicks, cleaner execution.")
+TAGLINES+=("Shell yeah—I'm here to remove toil and leave you the glory.")
 TAGLINES+=("If it's repetitive, I'll automate it; if it's hard, I'll bring jokes and a rollback plan.")
 TAGLINES+=("Because texting yourself reminders is so 2024.")
-TAGLINES+=("WhatsApp, but make it ✨engineering✨.")
-TAGLINES+=("Turning \"I'll reply later\" into \"my bot replied instantly\".")
-TAGLINES+=("The only crab in your contacts you actually want to hear from. 🦞")
+TAGLINES+=("Engineering-first automation, not dashboard theater.")
+TAGLINES+=("Turning repetitive chats into durable workflows.")
+TAGLINES+=("The operator in your terminal you've actually been waiting for.")
 TAGLINES+=("Chat automation for people who peaked at IRC.")
-TAGLINES+=("Because Siri wasn't answering at 3AM.")
-TAGLINES+=("IPC, but it's your phone.")
-TAGLINES+=("The UNIX philosophy meets your DMs.")
-TAGLINES+=("curl for conversations.")
-TAGLINES+=("WhatsApp Business, but without the business.")
-TAGLINES+=("Meta wishes they shipped this fast.")
-TAGLINES+=("End-to-end encrypted, Zuck-to-Zuck excluded.")
-TAGLINES+=("The only bot Mark can't train on your DMs.")
-TAGLINES+=("WhatsApp automation without the \"please accept our new privacy policy\".")
-TAGLINES+=("Chat APIs that don't require a Senate hearing.")
-TAGLINES+=("Because Threads wasn't the answer either.")
-TAGLINES+=("Your messages, your servers, Meta's tears.")
-TAGLINES+=("iMessage green bubble energy, but for everyone.")
-TAGLINES+=("Siri's competent cousin.")
-TAGLINES+=("Works on Android. Crazy concept, we know.")
-TAGLINES+=("No \$999 stand required.")
-TAGLINES+=("We ship features faster than Apple ships calculator updates.")
-TAGLINES+=("Your AI assistant, now without the \$3,499 headset.")
-TAGLINES+=("Think different. Actually think.")
-TAGLINES+=("Ah, the fruit tree company! 🍎")
+TAGLINES+=("Because waiting for the right dashboard at 3AM is not a plan.")
+TAGLINES+=("IPC, but for the systems you actually run.")
+TAGLINES+=("The UNIX philosophy meets real-world operations.")
+TAGLINES+=("Automation for conversations and systems alike.")
+TAGLINES+=("Channel automation, but on your terms.")
+TAGLINES+=("Built to ship faster without surrendering control.")
+TAGLINES+=("End-to-end encrypted workflows, operator in charge.")
+TAGLINES+=("The only bot in this loop works for you.")
+TAGLINES+=("Local-first AI operations without the cloud-control theatrics.")
+TAGLINES+=("Automation without committee-driven UX.")
+TAGLINES+=("Because one more social app was never the real answer.")
+TAGLINES+=("Your messages, your servers, your rules.")
+TAGLINES+=("Cross-platform operator energy, but for everyone.")
+TAGLINES+=("Your competent operations counterpart.")
+TAGLINES+=("Works across local setups. Crazy concept, we know.")
+TAGLINES+=("No expensive pedestal required.")
+TAGLINES+=("We ship iterations faster than most dashboards reload.")
+TAGLINES+=("Your AI runtime, on your hardware, under your control.")
+TAGLINES+=("Think clearly. Ship deliberately.")
+TAGLINES+=("Built for operators, not keynote demos.")
 
 HOLIDAY_NEW_YEAR="New Year's Day: New year, new config—same old EADDRINUSE, but this time we resolve it like grown-ups."
 HOLIDAY_LUNAR_NEW_YEAR="Lunar New Year: May your builds be lucky, your branches prosperous, and your merge conflicts chased away with fireworks."
-HOLIDAY_CHRISTMAS="Christmas: Ho ho ho—Santa's little claw-sistant is here to ship joy, roll back chaos, and stash the keys safely."
+HOLIDAY_CHRISTMAS="Christmas: Ho ho ho—your release assistant is here to ship joy, roll back chaos, and stash the keys safely."
 HOLIDAY_EID="Eid al-Fitr: Celebration mode: queues cleared, tasks completed, and good vibes committed to main with clean history."
 HOLIDAY_DIWALI="Diwali: Let the logs sparkle and the bugs flee—today we light up the terminal and ship with pride."
 HOLIDAY_EASTER="Easter: I found your missing environment variable—consider it a tiny CLI egg hunt with fewer jellybeans."
@@ -983,7 +983,7 @@ print_usage() {
 Vora installer (macOS + Linux)
 
 Usage:
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- [options]
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- [options]
 
 Options:
   --install-method, --method npm|git   Install via npm (default) or from a git checkout
@@ -1015,11 +1015,11 @@ Environment variables:
   SHARP_IGNORE_GLOBAL_LIBVIPS=0|1    Default: 1 (avoid sharp building against global libvips)
 
 Examples:
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- --no-onboard
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- --no-onboard --verify
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- --version main
-  curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- --install-method git --no-onboard
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- --no-onboard
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- --no-onboard --verify
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- --version main
+  curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- --install-method git --no-onboard
 EOF
 }
 
@@ -1211,7 +1211,7 @@ print_homebrew_admin_fix() {
     echo "  2) Ask an Administrator to grant admin rights, then sign out/in:"
     echo "     sudo dseditgroup -o edit -a ${current_user} -t user admin"
     echo "Then retry:"
-    echo "  curl -fsSL https://vora.ai/install.sh | bash"
+    echo "  curl -fsSL https://heyvora.fun/install.sh | bash"
 }
 
 install_homebrew() {
@@ -1365,7 +1365,7 @@ ensure_default_node_active_shell() {
         echo "  nvm use ${NODE_DEFAULT_MAJOR}"
         echo "  nvm alias default ${NODE_DEFAULT_MAJOR}"
         echo "Then open a new shell and rerun:"
-        echo "  curl -fsSL https://vora.ai/install.sh | bash"
+        echo "  curl -fsSL https://heyvora.fun/install.sh | bash"
     else
         echo "Install/select Node.js ${NODE_DEFAULT_MAJOR} (or Node ${NODE_MIN_VERSION}+ minimum) and ensure it is first on PATH, then rerun installer."
     fi
@@ -1952,7 +1952,9 @@ can_resolve_registry_package_version() {
     if [[ -z "$value" ]]; then
         return 0
     fi
-    if [[ "${value,,}" == "main" ]]; then
+    local lc_value
+    lc_value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lc_value" == "main" ]]; then
         return 1
     fi
     if is_explicit_package_install_spec "$value"; then
@@ -1964,8 +1966,10 @@ can_resolve_registry_package_version() {
 resolve_package_install_spec() {
     local package_name="$1"
     local value="$2"
-    if [[ "${value,,}" == "main" ]]; then
-        echo "github:vora/vora#main"
+    local lc_value
+    lc_value=$(echo "$value" | tr '[:upper:]' '[:lower:]')
+    if [[ "$lc_value" == "main" ]]; then
+        echo "github:vora-ai/vora-core#main"
         return 0
     fi
     if is_explicit_package_install_spec "$value"; then
@@ -1980,14 +1984,14 @@ resolve_package_install_spec() {
 }
 
 install_vora() {
-    local package_name="vora"
+    local package_name="vora-ai"
     if [[ "$USE_BETA" == "1" ]]; then
         local beta_version=""
         beta_version="$(resolve_beta_version || true)"
         if [[ -n "$beta_version" ]]; then
             VORA_VERSION="$beta_version"
             ui_info "Beta tag detected (${beta_version})"
-            package_name="vora"
+            package_name="vora-ai"
         else
             VORA_VERSION="latest"
             ui_info "No beta tag found; using latest"
@@ -2018,9 +2022,9 @@ install_vora() {
 
     if [[ "${VORA_VERSION}" == "latest" && "${package_name}" == "vora" ]]; then
         if ! resolve_vora_bin &> /dev/null; then
-            ui_warn "npm install vora@latest failed; retrying vora@next"
+            ui_warn "npm install vora-ai@latest failed; retrying vora-ai@next"
             cleanup_npm_vora_paths
-            install_vora_npm "vora@next"
+            install_vora_npm "vora-ai@next"
         fi
     fi
 
@@ -2032,31 +2036,31 @@ install_vora() {
 # Run doctor for migrations (safe, non-interactive)
 run_doctor() {
     ui_info "Running doctor to migrate settings"
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]]; then
-        claw="$(resolve_vora_bin || true)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]]; then
+        vora_bin="$(resolve_vora_bin || true)"
     fi
-    if [[ -z "$claw" ]]; then
+    if [[ -z "$vora_bin" ]]; then
         ui_info "Skipping doctor (vora not on PATH yet)"
         warn_vora_not_found
         return 0
     fi
-    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || true
+    run_quiet_step "Running doctor" "$vora_bin" doctor --non-interactive || true
     ui_success "Doctor complete"
 }
 
 maybe_open_dashboard() {
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]]; then
-        claw="$(resolve_vora_bin || true)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]]; then
+        vora_bin="$(resolve_vora_bin || true)"
     fi
-    if [[ -z "$claw" ]]; then
+    if [[ -z "$vora_bin" ]]; then
         return 0
     fi
-    if ! "$claw" dashboard --help >/dev/null 2>&1; then
+    if ! "$vora_bin" dashboard --help >/dev/null 2>&1; then
         return 0
     fi
-    "$claw" dashboard || true
+    "$vora_bin" dashboard || true
 }
 
 resolve_workspace_dir() {
@@ -2074,7 +2078,7 @@ run_bootstrap_onboarding_if_needed() {
     fi
 
     local config_path="${VORA_CONFIG_PATH:-$HOME/.vora/vora.json}"
-    if [[ -f "${config_path}" || -f "$HOME/.clawdbot/clawdbot.json" ]]; then
+    if [[ -f "${config_path}" || -f "$HOME/.vora/vora.json" ]]; then
         return
     fi
 
@@ -2092,17 +2096,17 @@ run_bootstrap_onboarding_if_needed() {
     fi
 
     ui_info "BOOTSTRAP.md found; starting onboarding"
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]]; then
-        claw="$(resolve_vora_bin || true)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]]; then
+        vora_bin="$(resolve_vora_bin || true)"
     fi
-    if [[ -z "$claw" ]]; then
+    if [[ -z "$vora_bin" ]]; then
         ui_info "BOOTSTRAP.md found but vora not on PATH; skipping onboarding"
         warn_vora_not_found
         return
     fi
 
-    "$claw" onboard || {
+    "$vora_bin" onboard || {
         ui_error "Onboarding failed; run vora onboard to retry"
         return
     }
@@ -2144,12 +2148,12 @@ fi
 resolve_vora_version() {
     local version=""
     local raw_version_output=""
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]] && command -v vora &> /dev/null; then
-        claw="$(command -v vora)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]] && command -v vora &> /dev/null; then
+        vora_bin="$(command -v vora)"
     fi
-    if [[ -n "$claw" ]]; then
-        raw_version_output=$("$claw" --version 2>/dev/null | head -n 1 | tr -d '\r')
+    if [[ -n "$vora_bin" ]]; then
+        raw_version_output=$("$vora_bin" --version 2>/dev/null | head -n 1 | tr -d '\r')
         version="$(extract_vora_semver "$raw_version_output")"
         if [[ -z "$version" ]]; then
             version="$raw_version_output"
@@ -2166,13 +2170,13 @@ resolve_vora_version() {
 }
 
 is_gateway_daemon_loaded() {
-    local claw="$1"
-    if [[ -z "$claw" ]]; then
+    local vora_bin="$1"
+    if [[ -z "$vora_bin" ]]; then
         return 1
     fi
 
     local status_json=""
-    status_json="$("$claw" daemon status --json 2>/dev/null || true)"
+    status_json="$("$vora_bin" daemon status --json 2>/dev/null || true)"
     if [[ -z "$status_json" ]]; then
         return 1
     fi
@@ -2191,34 +2195,34 @@ try {
 }
 
 refresh_gateway_service_if_loaded() {
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]]; then
-        claw="$(resolve_vora_bin || true)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]]; then
+        vora_bin="$(resolve_vora_bin || true)"
     fi
-    if [[ -z "$claw" ]]; then
+    if [[ -z "$vora_bin" ]]; then
         return 0
     fi
 
-    if ! is_gateway_daemon_loaded "$claw"; then
+    if ! is_gateway_daemon_loaded "$vora_bin"; then
         return 0
     fi
 
     ui_info "Refreshing loaded gateway service"
-    if run_quiet_step "Refreshing gateway service" "$claw" gateway install --force; then
+    if run_quiet_step "Refreshing gateway service" "$vora_bin" gateway install --force; then
         ui_success "Gateway service metadata refreshed"
     else
         ui_warn "Gateway service refresh failed; continuing"
         return 0
     fi
 
-    if run_quiet_step "Restarting gateway service" "$claw" gateway restart; then
+    if run_quiet_step "Restarting gateway service" "$vora_bin" gateway restart; then
         ui_success "Gateway service restarted"
     else
         ui_warn "Gateway service restart failed; continuing"
         return 0
     fi
 
-    run_quiet_step "Probing gateway service" "$claw" gateway status --deep || true
+    run_quiet_step "Probing gateway service" "$vora_bin" gateway status --deep || true
 }
 
 verify_installation() {
@@ -2227,20 +2231,20 @@ verify_installation() {
     fi
 
     ui_stage "Verifying installation"
-    local claw="${VORA_BIN:-}"
-    if [[ -z "$claw" ]]; then
-        claw="$(resolve_vora_bin || true)"
+    local vora_bin="${VORA_BIN:-}"
+    if [[ -z "$vora_bin" ]]; then
+        vora_bin="$(resolve_vora_bin || true)"
     fi
-    if [[ -z "$claw" ]]; then
+    if [[ -z "$vora_bin" ]]; then
         ui_error "Install verify failed: vora not on PATH yet"
         warn_vora_not_found
         return 1
     fi
 
-    run_quiet_step "Checking Vora version" "$claw" --version || return 1
+    run_quiet_step "Checking Vora version" "$vora_bin" --version || return 1
 
-    if is_gateway_daemon_loaded "$claw"; then
-        run_quiet_step "Checking gateway service" "$claw" gateway status --deep || {
+    if is_gateway_daemon_loaded "$vora_bin"; then
+        run_quiet_step "Checking gateway service" "$vora_bin" gateway status --deep || {
             ui_error "Install verify failed: gateway service unhealthy"
             ui_info "Run: vora gateway status --deep"
             return 1
@@ -2398,23 +2402,23 @@ main() {
 
     echo ""
     if [[ -n "$installed_version" ]]; then
-        ui_celebrate "🦞 Vora installed successfully (${installed_version})!"
+        ui_celebrate "🌊 Vora installed successfully (${installed_version})!"
     else
-        ui_celebrate "🦞 Vora installed successfully!"
+        ui_celebrate "🌊 Vora installed successfully!"
     fi
     if [[ "$is_upgrade" == "true" ]]; then
         local update_messages=(
             "Leveled up! New skills unlocked. You're welcome."
-            "Fresh code, same lobster. Miss me?"
+            "Fresh code, same mission. Miss me?"
             "Back and better. Did you even notice I was gone?"
             "Update complete. I learned some new tricks while I was out."
             "Upgraded! Now with 23% more sass."
-            "I've evolved. Try to keep up. 🦞"
+            "I've evolved. Try to keep up."
             "New version, who dis? Oh right, still me but shinier."
-            "Patched, polished, and ready to pinch. Let's go."
-            "The lobster has molted. Harder shell, sharper claws."
+            "Patched, polished, and ready to work. Let's go."
+            "Fresh build, tighter edges, cleaner defaults."
             "Update done! Check the changelog or just trust me, it's good."
-            "Reborn from the boiling waters of npm. Stronger now."
+            "Back from the npm pipeline. Stronger now."
             "I went away and came back smarter. You should try it sometime."
             "Update complete. The bugs feared me, so they left."
             "New version installed. Old version sends its regards."
@@ -2437,8 +2441,8 @@ main() {
             "Settled in. Time to automate your life whether you're ready or not."
             "Cozy. I've already read your calendar. We need to talk."
             "Finally unpacked. Now point me at your problems."
-            "cracks claws Alright, what are we building?"
-            "The lobster has landed. Your terminal will never be the same."
+            "All right, what are we building?"
+            "VORA is in place. Your terminal is ready."
             "All done! I promise to only judge your code a little bit."
         )
         local completion_message
@@ -2452,35 +2456,35 @@ main() {
         ui_kv "Checkout" "$final_git_dir"
         ui_kv "Wrapper" "$HOME/.local/bin/vora"
         ui_kv "Update command" "vora update --restart"
-        ui_kv "Switch to npm" "curl -fsSL --proto '=https' --tlsv1.2 https://vora.ai/install.sh | bash -s -- --install-method npm"
+        ui_kv "Switch to npm" "curl -fsSL --proto '=https' --tlsv1.2 https://heyvora.fun/install.sh | bash -s -- --install-method npm"
     elif [[ "$is_upgrade" == "true" ]]; then
         ui_info "Upgrade complete"
         if [[ -r /dev/tty && -w /dev/tty ]]; then
-            local claw="${VORA_BIN:-}"
-            if [[ -z "$claw" ]]; then
-                claw="$(resolve_vora_bin || true)"
+            local vora_bin="${VORA_BIN:-}"
+            if [[ -z "$vora_bin" ]]; then
+                vora_bin="$(resolve_vora_bin || true)"
             fi
-            if [[ -z "$claw" ]]; then
+            if [[ -z "$vora_bin" ]]; then
                 ui_info "Skipping doctor (vora not on PATH yet)"
                 warn_vora_not_found
                 return 0
             fi
             local -a doctor_args=()
             if [[ "$NO_ONBOARD" == "1" ]]; then
-                if "$claw" doctor --help 2>/dev/null | grep -q -- "--non-interactive"; then
+                if "$vora_bin" doctor --help 2>/dev/null | grep -q -- "--non-interactive"; then
                     doctor_args+=("--non-interactive")
                 fi
             fi
             ui_info "Running vora doctor"
             local doctor_ok=0
             if (( ${#doctor_args[@]} )); then
-                VORA_UPDATE_IN_PROGRESS=1 "$claw" doctor "${doctor_args[@]}" </dev/tty && doctor_ok=1
+                VORA_UPDATE_IN_PROGRESS=1 "$vora_bin" doctor "${doctor_args[@]}" </dev/tty && doctor_ok=1
             else
-                VORA_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty && doctor_ok=1
+                VORA_UPDATE_IN_PROGRESS=1 "$vora_bin" doctor </dev/tty && doctor_ok=1
             fi
             if (( doctor_ok )); then
                 ui_info "Updating plugins"
-                VORA_UPDATE_IN_PROGRESS=1 "$claw" plugins update --all || true
+                VORA_UPDATE_IN_PROGRESS=1 "$vora_bin" plugins update --all || true
             else
                 ui_warn "Doctor failed; skipping plugin updates"
             fi
@@ -2492,7 +2496,7 @@ main() {
             ui_info "Skipping onboard (requested); run vora onboard later"
         else
             local config_path="${VORA_CONFIG_PATH:-$HOME/.vora/vora.json}"
-            if [[ -f "${config_path}" || -f "$HOME/.clawdbot/clawdbot.json" ]]; then
+            if [[ -f "${config_path}" || -f "$HOME/.vora/vora.json" ]]; then
                 ui_info "Config already present; running doctor"
                 run_doctor
                 should_open_dashboard=true
@@ -2502,17 +2506,17 @@ main() {
             ui_info "Starting setup"
             echo ""
             if [[ -r /dev/tty && -w /dev/tty ]]; then
-                local claw="${VORA_BIN:-}"
-                if [[ -z "$claw" ]]; then
-                    claw="$(resolve_vora_bin || true)"
+                local vora_bin="${VORA_BIN:-}"
+                if [[ -z "$vora_bin" ]]; then
+                    vora_bin="$(resolve_vora_bin || true)"
                 fi
-                if [[ -z "$claw" ]]; then
+                if [[ -z "$vora_bin" ]]; then
                     ui_info "Skipping onboarding (vora not on PATH yet)"
                     warn_vora_not_found
                     return 0
                 fi
                 exec </dev/tty
-                exec "$claw" onboard
+                exec "$vora_bin" onboard
             fi
             ui_info "No TTY; run vora onboard to finish setup"
             return 0
@@ -2520,16 +2524,16 @@ main() {
     fi
 
     if command -v vora &> /dev/null; then
-        local claw="${VORA_BIN:-}"
-        if [[ -z "$claw" ]]; then
-            claw="$(resolve_vora_bin || true)"
+        local vora_bin="${VORA_BIN:-}"
+        if [[ -z "$vora_bin" ]]; then
+            vora_bin="$(resolve_vora_bin || true)"
         fi
-        if [[ -n "$claw" ]] && is_gateway_daemon_loaded "$claw"; then
+        if [[ -n "$vora_bin" ]] && is_gateway_daemon_loaded "$vora_bin"; then
             if [[ "$DRY_RUN" == "1" ]]; then
                 ui_info "Gateway daemon detected; would restart (vora daemon restart)"
             else
                 ui_info "Gateway daemon detected; restarting"
-                if VORA_UPDATE_IN_PROGRESS=1 "$claw" daemon restart >/dev/null 2>&1; then
+                if VORA_UPDATE_IN_PROGRESS=1 "$vora_bin" daemon restart >/dev/null 2>&1; then
                     ui_success "Gateway restarted"
                 else
                     ui_warn "Gateway restart failed; try: vora daemon restart"

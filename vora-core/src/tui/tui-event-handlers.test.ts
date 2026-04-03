@@ -275,6 +275,33 @@ describe("tui-event-handlers: handleAgentEvent", () => {
     expect(tui.requestRender).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores malformed BTW payloads without throwing", () => {
+    const { state, btw, tui, handleBtwEvent } = createHandlersHarness({
+      state: { activeChatRunId: "run-main" },
+    });
+
+    expect(() =>
+      handleBtwEvent({
+        kind: "btw",
+        runId: "run-btw",
+        sessionKey: state.currentSessionKey,
+        question: "what changed?",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      handleBtwEvent({
+        kind: "btw",
+        runId: "run-btw-2",
+        sessionKey: state.currentSessionKey,
+        text: "missing question",
+      }),
+    ).not.toThrow();
+
+    expect(btw.showResult).not.toHaveBeenCalled();
+    expect(tui.requestRender).not.toHaveBeenCalled();
+    expect(state.activeChatRunId).toBe("run-main");
+  });
+
   it("keeps a local BTW result visible when its empty final chat event arrives", () => {
     const { state, btw, loadHistory, noteLocalBtwRunId, handleBtwEvent, handleChatEvent } =
       createHandlersHarness({

@@ -425,6 +425,7 @@ export async function compactEmbeddedPiSessionDirect(
       config: params.config,
       sessionKey: params.sessionKey,
       sessionId: params.sessionId,
+      provider: provider,
       warn: makeBootstrapWarn({
         sessionLabel,
         warn: (message) => log.warn(message),
@@ -589,16 +590,18 @@ export async function compactEmbeddedPiSessionDirect(
     const userTime = formatUserTime(new Date(), userTimezone, userTimeFormat);
     const isDefaultAgent = sessionAgentId === defaultAgentId;
     const promptMode =
-      isSubagentSessionKey(params.sessionKey) || isCronSessionKey(params.sessionKey)
+      provider === "groq"
         ? "minimal"
-        : "full";
+        : isSubagentSessionKey(params.sessionKey) || isCronSessionKey(params.sessionKey)
+          ? "minimal"
+          : "full";
     const docsPath = await resolveVoraDocsPath({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
       cwd: effectiveWorkspace,
       moduleUrl: import.meta.url,
     });
-    const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
+    const ttsHint = params.config ? buildTtsSystemPromptHint() : undefined;
     const ownerDisplay = resolveOwnerDisplaySetting(params.config);
     const appendPrompt = buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,

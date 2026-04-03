@@ -115,4 +115,31 @@ describe("getSoonestCooldownExpiry", () => {
       getSoonestCooldownExpiry(store, ["openai:p1", "openai:p2"], { now, forModel: "gpt-5.2" }),
     ).toBe(now + 20_000);
   });
+
+  it("does not bypass model-scoped cooldown for openai-codex", () => {
+    const now = 1_700_000_000_000;
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai-codex:p1": {
+          type: "oauth",
+          provider: "openai-codex",
+          access: "access-token",
+          refresh: "refresh-token",
+          expires: now + 3_600_000,
+        },
+      },
+      usageStats: {
+        "openai-codex:p1": {
+          cooldownUntil: now + 10_000,
+          cooldownReason: "rate_limit",
+          cooldownModel: "gpt-5.4",
+        },
+      },
+    };
+
+    expect(getSoonestCooldownExpiry(store, ["openai-codex:p1"], { now, forModel: "gpt-5.2" })).toBe(
+      now + 10_000,
+    );
+  });
 });

@@ -35,6 +35,9 @@ export async function resolvePreferredProviderForAuthChoice(params: {
     return pluginResolved.provider.id;
   }
 
+  if (choice === "ollama") {
+    return "ollama";
+  }
   if (choice === "custom-api-key") {
     return "custom";
   }

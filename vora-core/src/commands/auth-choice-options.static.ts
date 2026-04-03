@@ -21,6 +21,22 @@ export type AuthChoiceGroup = {
 
 export const CORE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
   {
+    value: "ollama",
+    label: "Ollama (Local/Free)",
+    hint: "Run a local Ollama server and use free local models",
+    groupId: "ollama",
+    groupLabel: "Ollama",
+    groupHint: "Run Ollama locally and pick a model already pulled on this machine",
+  },
+  {
+    value: "groq-api-key",
+    label: "Groq (Cloud/Fast)",
+    hint: "Use Groq's high-speed inference endpoints",
+    groupId: "groq",
+    groupLabel: "Groq",
+    groupHint: "Blazing fast model inference",
+  },
+  {
     value: "custom-api-key",
     label: "Custom Provider",
     hint: "Any OpenAI or Anthropic compatible endpoint",

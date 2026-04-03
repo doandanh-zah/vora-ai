@@ -150,7 +150,7 @@ export function resolveAuthProfileOrder(params: {
   // Otherwise, use round-robin: sort by lastUsed (oldest first)
   // preferredProfile goes first if specified (for explicit user choice)
   // lastGood is NOT prioritized - that would defeat round-robin
-  const sorted = orderProfilesByMode(deduped, store);
+  const sorted = orderProfilesByMode(deduped, store, providerAuthKey);
 
   if (preferredProfile && sorted.includes(preferredProfile)) {
     return [preferredProfile, ...sorted.filter((e) => e !== preferredProfile)];
@@ -159,8 +159,13 @@ export function resolveAuthProfileOrder(params: {
   return sorted;
 }
 
-function orderProfilesByMode(order: string[], store: AuthProfileStore): string[] {
+function orderProfilesByMode(
+  order: string[],
+  store: AuthProfileStore,
+  provider?: string,
+): string[] {
   const now = Date.now();
+  const isOpenAiCodex = normalizeProviderId(provider ?? "") === "openai-codex";
 
   // Partition into available and in-cooldown
   const available: string[] = [];
@@ -178,8 +183,12 @@ function orderProfilesByMode(order: string[], store: AuthProfileStore): string[]
   const scored = available.map((profileId) => {
     const type = store.profiles[profileId]?.type;
     const typeScore = type === "oauth" ? 0 : type === "token" ? 1 : type === "api_key" ? 2 : 3;
+    // Prefer explicit/named Codex OAuth profiles over `:default` so a stale
+    // bootstrap profile does not outrank the user's active OAuth account.
+    const codexDefaultPenalty =
+      isOpenAiCodex && profileId.endsWith(":default") ? 1 : 0;
     const lastUsed = store.usageStats?.[profileId]?.lastUsed ?? 0;
-    return { profileId, typeScore, lastUsed };
+    return { profileId, typeScore, codexDefaultPenalty, lastUsed };
   });
 
   // Primary sort: type preference (oauth > token > api_key).
@@ -189,6 +198,9 @@ function orderProfilesByMode(order: string[], store: AuthProfileStore): string[]
       // First by type (oauth > token > api_key)
       if (a.typeScore !== b.typeScore) {
         return a.typeScore - b.typeScore;
+      }
+      if (a.codexDefaultPenalty !== b.codexDefaultPenalty) {
+        return a.codexDefaultPenalty - b.codexDefaultPenalty;
       }
       // Then by lastUsed (oldest first)
       return a.lastUsed - b.lastUsed;

@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const REQUIRED_FILES = ["dist/index.js", "dist/build-info.json"];
+const REQUIRED_FILES = ["dist/index.js", "dist/build-info.json", "dist/control-ui/index.html"];
 const ENTRY_CANDIDATES = ["dist/entry.js", "dist/entry.mjs"];
 const PACKAGE_JSON_PATH = "package.json";
 

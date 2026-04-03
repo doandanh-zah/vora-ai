@@ -9,10 +9,12 @@ const filesToAudit = [
   "vora.mjs",
   "src/agents/system-prompt.ts",
   "src/cli/banner.ts",
+  "src/cli/program/help.ts",
   "src/cli/tagline.ts",
   "src/terminal/palette.ts",
   "src/terminal/theme.ts",
   "src/tui/theme/theme.ts",
+  "scripts/install.sh",
   "apps/macos/Sources/Vora/Resources/Info.plist",
 ];
 
@@ -22,6 +24,11 @@ const forbiddenMatchers = [
   /discord\.gg\/clawd/giu,
   /discord\.com\/invite\/clawd/giu,
   /clawhub\.ai/giu,
+  /whatsapp automation without/giu,
+  /green bubble/giu,
+  /fruit tree company/giu,
+  /claw-sistant/giu,
+  /lobster/giu,
 ];
 
 function indexToLine(text, index) {

@@ -11,13 +11,13 @@
     "opusscript": "^0.1.1"
   },
   "devDependencies": {
-    "vora": "workspace:*"
+    "vora-ai": "workspace:*"
   },
   "peerDependencies": {
-    "vora": ">=2026.4.1"
+    "vora-ai": ">=2026.4.1"
   },
   "peerDependenciesMeta": {
-    "vora": {
+    "vora-ai": {
       "optional": true
     }
   },

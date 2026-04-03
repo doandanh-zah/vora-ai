@@ -293,7 +293,7 @@ async function prepareAgentCommandExecution(
   const runId = opts.runId?.trim() || sessionId;
   const acpManager = getAcpSessionManager();
   const acpResolution = sessionKey
-    ? acpManager.resolveSession({
+    ? acpManager?.resolveSession({
         cfg,
         sessionKey,
       })

@@ -34,6 +34,10 @@ export function normalizeReplyPayload(
   payload: ReplyPayload,
   opts: NormalizeReplyOptions = {},
 ): ReplyPayload | null {
+  if (!payload || typeof payload !== "object") {
+    opts.onSkip?.("empty");
+    return null;
+  }
   const applyChannelTransforms = opts.applyChannelTransforms ?? true;
   const hasContent = (text: string | undefined) =>
     hasReplyPayloadContent(

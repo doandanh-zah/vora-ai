@@ -323,7 +323,7 @@ export async function runConfigureWizard(
   runtime: RuntimeEnv = defaultRuntime,
 ) {
   try {
-    intro(opts.command === "update" ? "VORA update wizard" : "VORA configure");
+    intro(opts.command === "update" ? "🌊 VORA Update Wizard" : "🌊 VORA Setup — Your Voice-First Agent");
     const prompter = createClackPrompter();
 
     const snapshot = await readConfigFileSnapshot();
@@ -354,7 +354,7 @@ export async function runConfigureWizard(
       }
     }
 
-    const localUrl = "ws://127.0.0.1:18789";
+    const localUrl = `ws://127.0.0.1:${resolveGatewayPort(baseConfig)}`;
     const baseLocalProbeToken = await resolveGatewaySecretInputForWizard({
       cfg: baseConfig,
       value: baseConfig.gateway?.auth?.token,

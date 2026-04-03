@@ -1777,7 +1777,7 @@ export const chatHandlers: GatewayRequestHandlers = {
               const combinedReply = deliveredReplies
                 .filter((entry) => entry.kind === "final")
                 .map((entry) => entry.payload)
-                .map((part) => part.text?.trim() ?? "")
+                .map((part) => (part && typeof part.text === "string" ? part.text.trim() : ""))
                 .filter(Boolean)
                 .join("\n\n")
                 .trim();

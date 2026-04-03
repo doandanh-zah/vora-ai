@@ -398,8 +398,8 @@ export function createEventHandlers(context: EventHandlerContext) {
     if (evt.kind !== "btw") {
       return;
     }
-    const question = evt.question.trim();
-    const text = evt.text.trim();
+    const question = asString(evt.question, "").trim();
+    const text = asString(evt.text, "").trim();
     if (!question || !text) {
       return;
     }

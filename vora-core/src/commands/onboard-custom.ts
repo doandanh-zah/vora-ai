@@ -4,7 +4,7 @@ import { buildModelAliasIndex, modelKey } from "../agents/model-selection.js";
 import type { VoraConfig } from "../config/config.js";
 import type { ModelProviderConfig } from "../config/types.models.js";
 import { isSecretRef, type SecretInput } from "../config/types.secrets.js";
-import { OLLAMA_DEFAULT_BASE_URL } from "../plugin-sdk/ollama-surface.js";
+import { OLLAMA_DEFAULT_BASE_URL as OLLAMA_DEFAULT_BASE_URL_SURFACE } from "../plugin-sdk/ollama-surface.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { fetchWithTimeout } from "../utils/fetch-timeout.js";
 import {
@@ -23,6 +23,10 @@ const DEFAULT_MAX_TOKENS = 4096;
 const AZURE_DEFAULT_CONTEXT_WINDOW = 400_000;
 const AZURE_DEFAULT_MAX_TOKENS = 16_384;
 const VERIFY_TIMEOUT_MS = 30_000;
+const OLLAMA_DEFAULT_BASE_URL =
+  typeof OLLAMA_DEFAULT_BASE_URL_SURFACE === "string" && OLLAMA_DEFAULT_BASE_URL_SURFACE.trim()
+    ? OLLAMA_DEFAULT_BASE_URL_SURFACE
+    : "http://127.0.0.1:11434";
 
 function normalizeContextWindowForCustomModel(value: unknown): number {
   const parsed = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : 0;

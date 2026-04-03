@@ -23,24 +23,24 @@ const ROOT_COMMANDS_HINT =
 const EXAMPLES = [
   ["vora models --help", "Show detailed help for the models command."],
   [
-    "vora channels login --verbose",
-    "Link personal WhatsApp Web and show QR + connection logs.",
+    "vora onboard",
+    "Run interactive onboarding for the gateway, workspace, and skills.",
   ],
   [
-    'vora message send --target +15555550123 --message "Hi" --json',
-    "Send via your web session and print JSON result.",
+    "vora configure --section model --section gateway",
+    "Re-open only the model and gateway configuration sections.",
   ],
-  ["vora gateway --port 18789", "Run the WebSocket Gateway locally."],
+  ["vora gateway --port 27106", "Run the WebSocket Gateway locally."],
   ["vora --dev gateway", "Run a dev Gateway (isolated state/config) on ws://127.0.0.1:19001."],
   ["vora gateway --force", "Kill anything bound to the default gateway port, then start it."],
-  ["vora gateway ...", "Gateway control via WebSocket."],
+  ["vora models status --plain", "Show the configured provider and default-model state."],
   [
-    'vora agent --to +15555550123 --message "Run summary" --deliver',
-    "Talk directly to the agent using the Gateway; optionally send the WhatsApp reply.",
+    "vora gateway ...",
+    "Gateway control via WebSocket.",
   ],
   [
     'vora message send --channel telegram --target @mychat --message "Hi"',
-    "Send via your Telegram bot.",
+    "Send through a configured channel and print the result in the terminal.",
   ],
 ] as const;
 

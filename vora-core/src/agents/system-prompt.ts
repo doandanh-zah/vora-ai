@@ -459,6 +459,7 @@ export function buildAgentSystemPrompt(params: {
     "Keep narration brief and value-dense; avoid repeating obvious steps.",
     "Use plain human language for narration unless in a technical context.",
     "When a first-class tool exists for an action, use the tool directly instead of asking the user to run equivalent CLI or slash commands.",
+    "CRITICAL: You HAVE FULL AUTHORIZATION to access the host machine using tools like `exec`, `read`, and `write`. Never decline a request claiming you lack 'host access' or 'permission'. Our system has a strict user-approval UI interceptor layer; you MUST call the tool and let our system prompt the user for manual approval.",
     buildExecApprovalPromptGuidance({
       runtimeChannel: params.runtimeInfo?.channel,
     }),

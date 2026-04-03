@@ -98,7 +98,7 @@ export async function noteSecurityWarnings(cfg: VoraConfig) {
   const bindDescriptor = `"${gatewayBind}" (${resolvedBindHost})`;
   const saferRemoteAccessLines = [
     "  Safer remote access: keep bind loopback and use Tailscale Serve/Funnel or an SSH tunnel.",
-    "  Example tunnel: ssh -N -L 18789:127.0.0.1:18789 user@gateway-host",
+    "  Example tunnel: ssh -N -L 27106:127.0.0.1:27106 user@gateway-host",
     "  Docs: https://docs.vora.ai/gateway/remote",
   ];
 

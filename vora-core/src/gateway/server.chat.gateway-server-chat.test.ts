@@ -561,6 +561,37 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.send surfaces agent errors instead of throwing on empty final payload entries", async () => {
+    await withMainSessionStore(async () => {
+      const expectedError = 'No API key found for provider "anthropic"';
+      vi.mocked(agentCommand).mockRejectedValueOnce(new Error(expectedError));
+      const errorEventPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "error" &&
+          o.payload?.runId === "idem-chat-agent-error-1",
+        8000,
+      );
+
+      const res = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "hello",
+        idempotencyKey: "idem-chat-agent-error-1",
+      });
+
+      expect(res.ok).toBe(true);
+      const errorEvent = await errorEventPromise;
+      const errorMessage =
+        errorEvent.payload && typeof errorEvent.payload.errorMessage === "string"
+          ? errorEvent.payload.errorMessage
+          : "";
+      expect(errorMessage).toContain(expectedError);
+      expect(errorMessage).not.toContain("Cannot read properties of undefined (reading 'text')");
+    });
+  });
+
   test("routes /btw replies through side-result events without transcript injection", async () => {
     await withMainSessionStore(async () => {
       mockGetReplyFromConfigOnce(async () => ({

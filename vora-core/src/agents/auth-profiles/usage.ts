@@ -246,7 +246,8 @@ export function isProfileInCooldown(
   now?: number,
   forModel?: string,
 ): boolean {
-  if (isAuthCooldownBypassedForProvider(store.profiles[profileId]?.provider)) {
+  const provider = store.profiles[profileId]?.provider;
+  if (isAuthCooldownBypassedForProvider(provider)) {
     return false;
   }
   const stats = store.usageStats?.[profileId];
@@ -258,7 +259,7 @@ export function isProfileInCooldown(
   // specific model and the caller is requesting a *different* model, allow it.
   // We still honour any active billing/auth disable (`disabledUntil`) — those
   // are profile-wide and must not be short-circuited by model scoping.
-  if (shouldBypassModelScopedCooldown(stats, ts, forModel)) {
+  if (shouldBypassModelScopedCooldown(stats, ts, forModel, provider)) {
     return false;
   }
   const unusableUntil = resolveProfileUnusableUntil(stats);
@@ -365,7 +366,14 @@ export function getSoonestCooldownExpiry(
     if (!stats) {
       continue;
     }
-    if (shouldBypassModelScopedCooldown(stats, ts, options?.forModel)) {
+    if (
+      shouldBypassModelScopedCooldown(
+        stats,
+        ts,
+        options?.forModel,
+        store.profiles[id]?.provider,
+      )
+    ) {
       continue;
     }
     const until = resolveProfileUnusableUntil(stats);
@@ -383,7 +391,13 @@ function shouldBypassModelScopedCooldown(
   stats: Pick<ProfileUsageStats, "cooldownReason" | "cooldownModel" | "disabledUntil">,
   now: number,
   forModel?: string,
+  provider?: string,
 ): boolean {
+  // OpenAI Codex org/account TPM limits are effectively profile-wide even when
+  // surfaced from a specific model request, so do not allow model-based bypass.
+  if (normalizeProviderId(provider ?? "") === "openai-codex") {
+    return false;
+  }
   return !!(
     forModel &&
     stats.cooldownReason === "rate_limit" &&

@@ -267,7 +267,7 @@ describe("buildAuthChoiceOptions", () => {
     expect(cliChoices).toContain("custom-api-key");
     expect(cliChoices).toContain("skip");
     expect(options.some((option) => option.value === "ollama")).toBe(true);
-    expect(cliChoices).not.toContain("ollama");
+    expect(cliChoices).toContain("ollama");
   });
 
   it("can include legacy aliases in cli help choices", () => {
@@ -326,7 +326,7 @@ describe("buildAuthChoiceOptions", () => {
       includeSkip: true,
     }).split("|");
 
-    expect(cliChoices).not.toContain("ollama");
+    expect(cliChoices).toContain("ollama");
     expect(cliChoices).not.toContain("openai-api-key");
     expect(cliChoices).not.toContain("chutes");
     expect(cliChoices).not.toContain("litellm-api-key");

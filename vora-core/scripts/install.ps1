@@ -1,6 +1,6 @@
 # Vora Installer for Windows (PowerShell)
-# Usage: iwr -useb https://vora.ai/install.ps1 | iex
-# Or: & ([scriptblock]::Create((iwr -useb https://vora.ai/install.ps1))) -NoOnboard
+# Usage: iwr -useb https://heyvora.fun/install.ps1 | iex
+# Or: & ([scriptblock]::Create((iwr -useb https://heyvora.fun/install.ps1))) -NoOnboard
 
 param(
     [string]$InstallMethod = "npm",
@@ -14,10 +14,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Colors
-$ACCENT = "`e[38;2;255;77;77m"    # coral-bright
+$ACCENT = "`e[38;2;0;153;255m"    # coral-bright
 $SUCCESS = "`e[38;2;0;229;204m"    # cyan-bright
 $WARN = "`e[38;2;255;176;32m"     # amber
-$ERROR = "`e[38;2;230;57;70m"     # coral-mid
+$ERROR_COLOR = "`e[38;2;230;57;70m"     # coral-mid
 $MUTED = "`e[38;2;90;100;128m"    # text-muted
 $NC = "`e[0m"                     # No Color
 
@@ -26,7 +26,7 @@ function Write-Host {
     $msg = switch ($Level) {
         "success" { "$SUCCESS✓$NC $Message" }
         "warn" { "$WARN!$NC $Message" }
-        "error" { "$ERROR✗$NC $Message" }
+        "error" { "$ERROR_COLOR✗$NC $Message" }
         default { "$MUTED·$NC $Message" }
     }
     Microsoft.PowerShell.Host\Write-Host $msg
@@ -34,8 +34,8 @@ function Write-Host {
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "${ACCENT}  🦞 Vora Installer$NC" -Level info
-    Write-Host "${MUTED}  All your chats, one Vora.$NC" -Level info
+    Write-Host "${ACCENT}  🌊 Vora Installer$NC" -Level info
+    Write-Host "${MUTED}  `"Hey Vora`" - The voice-first AI agent powered by Agora.$NC" -Level info
     Write-Host ""
 }
 
@@ -276,15 +276,15 @@ function Resolve-PackageInstallSpec {
 
     $trimmed = $Target.Trim()
     if ([string]::IsNullOrWhiteSpace($trimmed)) {
-        return "vora@latest"
+        return "vora-ai@latest"
     }
     if ($trimmed.ToLowerInvariant() -eq "main") {
-        return "github:vora/vora#main"
+        return "github:vora-ai/vora-core#main"
     }
     if (Test-ExplicitPackageInstallSpec -Target $trimmed) {
         return $trimmed
     }
-    return "vora@$trimmed"
+    return "vora-ai@$trimmed"
 }
 
 function Add-ToPath {
@@ -349,11 +349,17 @@ function Main {
     
     if (!$NoOnboard -and !$DryRun) {
         Write-Host ""
-        Write-Host "Run 'vora onboard' to complete setup" -Level info
+        Write-Host "Starting onboarding process..." -Level info
+        
+        try {
+            & vora onboard
+        } catch {
+            Write-Host "Failed to start onboard automatically. Run 'vora onboard' to complete setup" -Level error
+        }
     }
     
     Write-Host ""
-    Write-Host "🦞 Vora installed successfully!" -Level success
+    Write-Host "🌊 Vora installed successfully!" -Level success
 }
 
 Main

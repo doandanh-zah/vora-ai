@@ -182,6 +182,9 @@ async function closeAcpRuntimeForSession(params: {
     return undefined;
   }
   const acpManager = getAcpSessionManager();
+  if (!acpManager) {
+    return undefined;
+  }
   const cancelOutcome = await runAcpCleanupStep({
     op: async () => {
       await acpManager.cancelSession({

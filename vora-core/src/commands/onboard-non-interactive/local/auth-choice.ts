@@ -1,7 +1,12 @@
+import { resolveAgentDir, resolveDefaultAgentId } from "../../../agents/agent-scope.js";
+import { upsertAuthProfile } from "../../../agents/auth-profiles.js";
 import type { ApiKeyCredential } from "../../../agents/auth-profiles/types.js";
+import { OLLAMA_LOCAL_AUTH_MARKER } from "../../../agents/model-auth-markers.js";
 import type { VoraConfig } from "../../../config/config.js";
 import type { SecretInput } from "../../../config/types.secrets.js";
 import { resolveManifestDeprecatedProviderAuthChoice } from "../../../plugins/provider-auth-choices.js";
+import { applyAuthProfileConfig } from "../../../plugins/provider-auth-helpers.js";
+import { applyPrimaryModel } from "../../../plugins/provider-model-primary.js";
 import type { RuntimeEnv } from "../../../runtime.js";
 import { resolveDefaultSecretProviderAlias } from "../../../secrets/ref-contract.js";
 import {
@@ -9,7 +14,14 @@ import {
   isDeprecatedAuthChoice,
 } from "../../auth-choice-legacy.js";
 import { normalizeSecretInputModeInput } from "../../auth-choice.apply-helpers.js";
-import { normalizeApiKeyTokenProviderAuthChoice } from "../../auth-choice.apply.api-providers.js";
+import {
+  discoverOllamaModelIds,
+  mergeOllamaProviderConfig,
+  normalizeApiKeyTokenProviderAuthChoice,
+  normalizeOllamaBaseUrl,
+  OLLAMA_DEFAULT_BASE_URL,
+  OLLAMA_PROFILE_ID,
+} from "../../auth-choice.apply.api-providers.js";
 import {
   applyCustomApiConfig,
   CustomApiError,
@@ -238,6 +250,54 @@ export async function applyNonInteractiveAuthChoice(params: {
       runtime.exit(1);
       return null;
     }
+  }
+
+  if (authChoice === "ollama") {
+    const baseUrl = normalizeOllamaBaseUrl(opts.customBaseUrl ?? OLLAMA_DEFAULT_BASE_URL);
+    let modelId = opts.customModelId?.trim();
+    if (!modelId) {
+      try {
+        modelId = (await discoverOllamaModelIds(baseUrl))[0];
+      } catch {
+        modelId = undefined;
+      }
+    }
+    if (!modelId) {
+      runtime.error(
+        [
+          'Auth choice "ollama" requires a local Ollama model.',
+          "Run `ollama serve`, pull a model such as `ollama pull qwen3:4b`, then retry.",
+          "Non-interactive fallback: pass --custom-model-id <model>.",
+        ].join("\n"),
+      );
+      runtime.exit(1);
+      return null;
+    }
+
+    const resolvedAgentId = resolveDefaultAgentId(nextConfig);
+    const agentDir = resolveAgentDir(nextConfig, resolvedAgentId, process.env);
+    upsertAuthProfile({
+      profileId: OLLAMA_PROFILE_ID,
+      credential: {
+        type: "api_key",
+        provider: "ollama",
+        key: OLLAMA_LOCAL_AUTH_MARKER,
+      },
+      agentDir,
+    });
+
+    nextConfig = mergeOllamaProviderConfig({
+      config: nextConfig,
+      baseUrl,
+      modelId,
+    });
+    nextConfig = applyAuthProfileConfig(nextConfig, {
+      profileId: OLLAMA_PROFILE_ID,
+      provider: "ollama",
+      mode: "api_key",
+    });
+    nextConfig = applyPrimaryModel(nextConfig, `ollama/${modelId}`);
+    return nextConfig;
   }
 
   if (

@@ -121,6 +121,31 @@ export function mapFailoverReasonToProbeStatus(reason?: string | null): AuthProb
   return "unknown";
 }
 
+export function resolveEmbeddedProbeStopError(
+  result: Pick<
+    Awaited<ReturnType<typeof runEmbeddedVoraAgent>>,
+    "payloads" | "meta"
+  >,
+): string | null {
+  if (result.meta?.stopReason !== "error") {
+    return null;
+  }
+
+  const payloadText = result.payloads
+    ?.map((entry) => (typeof entry?.text === "string" ? entry.text.trim() : ""))
+    .find((text) => text.length > 0);
+  if (payloadText) {
+    return payloadText;
+  }
+
+  const structuredError = result.meta?.error?.message;
+  if (typeof structuredError === "string" && structuredError.trim().length > 0) {
+    return structuredError.trim();
+  }
+
+  return "Probe run ended with stopReason=error.";
+}
+
 function buildCandidateMap(modelCandidates: string[]): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const raw of modelCandidates) {
@@ -450,7 +475,7 @@ async function probeTarget(params: {
     latencyMs: Date.now() - start,
   });
   try {
-    await runEmbeddedVoraAgent({
+    const runResult = await runEmbeddedVoraAgent({
       sessionId,
       sessionFile,
       agentId,
@@ -470,6 +495,14 @@ async function probeTarget(params: {
       verboseLevel: "off",
       streamParams: { maxTokens },
     });
+    const stopError = resolveEmbeddedProbeStopError(runResult);
+    if (stopError) {
+      const described = describeFailoverError(new Error(stopError));
+      return buildResult(
+        mapFailoverReasonToProbeStatus(described.reason),
+        redactSecrets(stopError),
+      );
+    }
     return buildResult("ok");
   } catch (err) {
     const described = describeFailoverError(err);

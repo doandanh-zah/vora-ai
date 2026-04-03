@@ -109,6 +109,15 @@ describe("normalizeReplyPayload", () => {
     }
   });
 
+  it("treats non-object payloads as empty instead of throwing", () => {
+    const reasons: string[] = [];
+    const normalized = normalizeReplyPayload(undefined as unknown as never, {
+      onSkip: (reason) => reasons.push(reason),
+    });
+    expect(normalized).toBeNull();
+    expect(reasons).toEqual(["empty"]);
+  });
+
   it("strips NO_REPLY from mixed emoji message (#30916)", () => {
     const result = normalizeReplyPayload({ text: "😄 NO_REPLY" });
     expect(result).not.toBeNull();

@@ -253,21 +253,23 @@ export async function tryFastAbortFromMessage(params: {
     const { entry, key, legacyKeys } = resolveSessionEntryForKey(store, targetKey);
     const resolvedTargetKey = key ?? targetKey;
     const acpManager = abortDeps.getAcpSessionManager();
-    const acpResolution = acpManager.resolveSession({
-      cfg,
-      sessionKey: resolvedTargetKey,
-    });
-    if (acpResolution.kind !== "none") {
-      try {
-        await acpManager.cancelSession({
-          cfg,
-          sessionKey: resolvedTargetKey,
-          reason: "fast-abort",
-        });
-      } catch (error) {
-        logVerbose(
-          `abort: ACP cancel failed for ${resolvedTargetKey}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+    if (acpManager) {
+      const acpResolution = acpManager.resolveSession({
+        cfg,
+        sessionKey: resolvedTargetKey,
+      });
+      if (acpResolution.kind !== "none") {
+        try {
+          await acpManager.cancelSession({
+            cfg,
+            sessionKey: resolvedTargetKey,
+            reason: "fast-abort",
+          });
+        } catch (error) {
+          logVerbose(
+            `abort: ACP cancel failed for ${resolvedTargetKey}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
     }
     const sessionId = entry?.sessionId;

@@ -3,13 +3,16 @@ import { fileURLToPath } from "node:url";
 import { resolveVoraPackageRoot } from "../infra/vora-root.js";
 import { pathExists } from "../utils.js";
 
-const FALLBACK_TEMPLATE_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "../../docs/reference/templates",
-);
-
 let cachedTemplateDir: string | undefined;
 let resolvingTemplateDir: Promise<string> | undefined;
+
+function resolveFallbackTemplateDirs(moduleUrl: string): string[] {
+  const moduleDir = path.dirname(fileURLToPath(moduleUrl));
+  return [
+    path.resolve(moduleDir, "../docs/reference/templates"),
+    path.resolve(moduleDir, "../../docs/reference/templates"),
+  ];
+}
 
 export async function resolveWorkspaceTemplateDir(opts?: {
   cwd?: string;
@@ -27,12 +30,13 @@ export async function resolveWorkspaceTemplateDir(opts?: {
     const moduleUrl = opts?.moduleUrl ?? import.meta.url;
     const argv1 = opts?.argv1 ?? process.argv[1];
     const cwd = opts?.cwd ?? process.cwd();
+    const fallbackTemplateDirs = resolveFallbackTemplateDirs(moduleUrl);
 
     const packageRoot = await resolveVoraPackageRoot({ moduleUrl, argv1, cwd });
     const candidates = [
       packageRoot ? path.join(packageRoot, "docs", "reference", "templates") : null,
       cwd ? path.resolve(cwd, "docs", "reference", "templates") : null,
-      FALLBACK_TEMPLATE_DIR,
+      ...fallbackTemplateDirs,
     ].filter(Boolean) as string[];
 
     for (const candidate of candidates) {
@@ -42,7 +46,7 @@ export async function resolveWorkspaceTemplateDir(opts?: {
       }
     }
 
-    cachedTemplateDir = candidates[0] ?? FALLBACK_TEMPLATE_DIR;
+    cachedTemplateDir = candidates[0] ?? fallbackTemplateDirs[0];
     return cachedTemplateDir;
   })();
 

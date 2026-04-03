@@ -2,6 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { VoraConfig } from "../../../config/config.js";
 import { applyNonInteractiveAuthChoice } from "./auth-choice.js";
 
+const resolveDefaultAgentId = vi.hoisted(() => vi.fn(() => "default"));
+const resolveAgentDir = vi.hoisted(() => vi.fn(() => "/tmp/vora-test-agent"));
+vi.mock("../../../agents/agent-scope.js", () => ({
+  resolveDefaultAgentId,
+  resolveAgentDir,
+}));
+
+const upsertAuthProfile = vi.hoisted(() => vi.fn());
+vi.mock("../../../agents/auth-profiles.js", () => ({
+  upsertAuthProfile,
+}));
+
 const applyNonInteractivePluginProviderChoice = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock("./auth-choice.plugin-providers.js", () => ({
   applyNonInteractivePluginProviderChoice,
@@ -18,6 +30,16 @@ vi.mock("../../../plugins/provider-auth-choices.js", () => ({
   resolveManifestDeprecatedProviderAuthChoice,
   resolveManifestProviderAuthChoices,
 }));
+
+const discoverOllamaModelIds = vi.hoisted(() => vi.fn(async () => ["qwen3:4b"]));
+vi.mock("../../auth-choice.apply.api-providers.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../auth-choice.apply.api-providers.js")>();
+  return {
+    ...actual,
+    discoverOllamaModelIds,
+  };
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,5 +93,43 @@ describe("applyNonInteractiveAuthChoice", () => {
     );
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(applyNonInteractivePluginProviderChoice).toHaveBeenCalledOnce();
+  });
+
+  it("configures local Ollama in non-interactive mode", async () => {
+    const runtime = createRuntime();
+    const nextConfig = { agents: { defaults: {} } } as VoraConfig;
+
+    const result = await applyNonInteractiveAuthChoice({
+      nextConfig,
+      authChoice: "ollama",
+      opts: {
+        customBaseUrl: "http://127.0.0.1:11434",
+        customModelId: "qwen3:4b",
+      } as never,
+      runtime: runtime as never,
+      baseConfig: nextConfig,
+    });
+
+    expect(result?.models?.providers?.ollama).toMatchObject({
+      baseUrl: "http://127.0.0.1:11434",
+      api: "ollama",
+      models: [expect.objectContaining({ id: "qwen3:4b" })],
+    });
+    expect(result?.auth?.profiles?.["ollama:default"]).toEqual({
+      provider: "ollama",
+      mode: "api_key",
+    });
+    expect(result?.agents?.defaults?.model).toEqual({
+      primary: "ollama/qwen3:4b",
+    });
+    expect(upsertAuthProfile).toHaveBeenCalledWith({
+      profileId: "ollama:default",
+      credential: {
+        type: "api_key",
+        provider: "ollama",
+        key: "ollama-local",
+      },
+      agentDir: "/tmp/vora-test-agent",
+    });
   });
 });

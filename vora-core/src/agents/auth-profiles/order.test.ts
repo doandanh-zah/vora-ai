@@ -22,4 +22,38 @@ describe("resolveAuthProfileOrder", () => {
 
     expect(order).toEqual(["volcengine:default"]);
   });
+
+  it("prefers named openai-codex oauth profiles over :default", () => {
+    const now = Date.now();
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai-codex:default": {
+          type: "oauth",
+          provider: "openai-codex",
+          access: "default-access",
+          refresh: "default-refresh",
+          expires: now + 60_000,
+        },
+        "openai-codex:doanzah": {
+          type: "oauth",
+          provider: "openai-codex",
+          access: "email-access",
+          refresh: "email-refresh",
+          expires: now + 60_000,
+        },
+      },
+      usageStats: {
+        "openai-codex:default": { lastUsed: 1 },
+        "openai-codex:doanzah": { lastUsed: 2 },
+      },
+    };
+
+    const order = resolveAuthProfileOrder({
+      store,
+      provider: "openai-codex",
+    });
+
+    expect(order).toEqual(["openai-codex:doanzah", "openai-codex:default"]);
+  });
 });

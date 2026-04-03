@@ -343,6 +343,9 @@ export async function tryDispatchAcpReply(params: {
   }
 
   const acpManager = getAcpSessionManager();
+  if (!acpManager) {
+    return null;
+  }
   const acpResolution = acpManager.resolveSession({
     cfg: params.cfg,
     sessionKey,

@@ -8,7 +8,18 @@ export function isSummarizationEnabled(): boolean { return false; }
 export function isTtsEnabled(): boolean { return false; }
 export function isTtsProviderConfigured(): boolean { return false; }
 export function listSpeechVoices(): string[] { return []; }
-export function maybeApplyTtsToPayload(): void {}
+export async function maybeApplyTtsToPayload<T extends { payload?: unknown }>(
+  params?: T,
+): Promise<unknown> {
+  if (!params || typeof params !== "object") {
+    return {};
+  }
+  const payload = (params as { payload?: unknown }).payload;
+  if (payload && typeof payload === "object") {
+    return payload;
+  }
+  return {};
+}
 export function resolveTtsAutoMode(): string { return "off"; }
 export function resolveTtsConfig(): null { return null; }
 export function resolveTtsPrefsPath(): string { return ""; }

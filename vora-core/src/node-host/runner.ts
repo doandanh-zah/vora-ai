@@ -1,4 +1,4 @@
-import { loadConfig, type VoraConfig } from "../config/config.js";
+import { DEFAULT_GATEWAY_PORT, loadConfig, type VoraConfig } from "../config/config.js";
 import { GatewayClient } from "../gateway/client.js";
 import { resolveGatewayConnectionAuth } from "../gateway/connection-auth.js";
 import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
@@ -173,7 +173,7 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
   });
 
   const host = gateway.host ?? "127.0.0.1";
-  const port = gateway.port ?? 18789;
+  const port = gateway.port ?? DEFAULT_GATEWAY_PORT;
   const scheme = gateway.tls ? "wss" : "ws";
   const url = `${scheme}://${host}:${port}`;
   const pathEnv = ensureNodePathEnv();

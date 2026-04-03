@@ -1,4 +1,4 @@
-import type { VoraConfig } from "../config/config.js";
+import { DEFAULT_GATEWAY_PORT, type VoraConfig } from "../config/config.js";
 import type { SecretInput } from "../config/types.secrets.js";
 import { isSecureWebSocketUrl } from "../gateway/net.js";
 import { discoverGatewayBeacons, type GatewayBonjourBeacon } from "../infra/bonjour-discovery.js";
@@ -13,7 +13,7 @@ import type { WizardPrompter } from "../wizard/prompts.js";
 import { detectBinary } from "./onboard-helpers.js";
 import type { SecretInputMode } from "./onboard-types.js";
 
-const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
+const DEFAULT_GATEWAY_URL = `ws://127.0.0.1:${DEFAULT_GATEWAY_PORT}`;
 
 function buildLabel(beacon: GatewayBonjourBeacon): string {
   return buildGatewayDiscoveryLabel(beacon);
@@ -128,7 +128,7 @@ export async function promptRemoteGatewayConfig(
               "Direct remote access defaults to TLS.",
               `Using: ${suggestedUrl}`,
               ...(fingerprint ? [`TLS pin: ${fingerprint}`] : []),
-              "If your gateway is loopback-only, choose SSH tunnel and keep ws://127.0.0.1:18789.",
+              `If your gateway is loopback-only, choose SSH tunnel and keep ${DEFAULT_GATEWAY_URL}.`,
             ].join("\n"),
             "Direct remote",
           );
@@ -141,7 +141,7 @@ export async function promptRemoteGatewayConfig(
         await prompter.note(
           [
             "Start a tunnel before using the CLI:",
-            `ssh -N -L 18789:127.0.0.1:18789 <user>@${host}${target.sshPort ? ` -p ${target.sshPort}` : ""}`,
+            `ssh -N -L ${DEFAULT_GATEWAY_PORT}:127.0.0.1:${DEFAULT_GATEWAY_PORT} <user>@${host}${target.sshPort ? ` -p ${target.sshPort}` : ""}`,
             "Docs: https://docs.vora.ai/gateway/remote",
           ].join("\n"),
           "SSH tunnel",

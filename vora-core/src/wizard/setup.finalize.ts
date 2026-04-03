@@ -23,7 +23,10 @@ import {
 } from "../commands/onboard-helpers.js";
 import type { OnboardOptions } from "../commands/onboard-types.js";
 import type { VoraConfig } from "../config/config.js";
-import { describeGatewayServiceRestart, resolveGatewayService } from "../daemon/service.js";
+import {
+  describeGatewayServiceRestart,
+  resolveGatewayService,
+} from "../daemon/service.js";
 import { isSystemdUserServiceAvailable } from "../daemon/systemd.js";
 import { ensureControlUiAssetsBuilt } from "../infra/control-ui-assets.js";
 import type { RuntimeEnv } from "../runtime.js";
@@ -50,7 +53,8 @@ type FinalizeOnboardingOptions = {
 export async function finalizeSetupWizard(
   options: FinalizeOnboardingOptions,
 ): Promise<{ launchedTui: boolean }> {
-  const { flow, opts, baseConfig, nextConfig, settings, prompter, runtime } = options;
+  const { flow, opts, baseConfig, nextConfig, settings, prompter, runtime } =
+    options;
   let gatewayProbe: { ok: boolean; detail?: string } = { ok: true };
 
   const withWizardProgress = async <T>(
@@ -63,7 +67,9 @@ export async function finalizeSetupWizard(
       return await work(progress);
     } finally {
       progress.stop(
-        typeof options.doneMessage === "function" ? options.doneMessage() : options.doneMessage,
+        typeof options.doneMessage === "function"
+          ? options.doneMessage()
+          : options.doneMessage,
       );
     }
   };
@@ -78,7 +84,8 @@ export async function finalizeSetupWizard(
   }
 
   if (process.platform === "linux" && systemdAvailable) {
-    const { ensureSystemdUserLingerInteractive } = await import("../commands/systemd-linger.js");
+    const { ensureSystemdUserLingerInteractive } =
+      await import("../commands/systemd-linger.js");
     await ensureSystemdUserLingerInteractive({
       runtime,
       prompter: {
@@ -153,7 +160,10 @@ export async function finalizeSetupWizard(
               env: process.env,
               stdout: process.stdout,
             });
-            const restartStatus = describeGatewayServiceRestart("Gateway", restartResult);
+            const restartStatus = describeGatewayServiceRestart(
+              "Gateway",
+              restartResult,
+            );
             restartDoneMessage = restartStatus.progressMessage;
             restartWasScheduled = restartStatus.scheduled;
           },
@@ -164,7 +174,10 @@ export async function finalizeSetupWizard(
           { doneMessage: "Gateway service uninstalled." },
           async (progress) => {
             progress.update("Uninstalling Gateway service…");
-            await service.uninstall({ env: process.env, stdout: process.stdout });
+            await service.uninstall({
+              env: process.env,
+              stdout: process.stdout,
+            });
           },
         );
       }
@@ -172,7 +185,9 @@ export async function finalizeSetupWizard(
 
     if (
       !loaded ||
-      (!restartWasScheduled && loaded && !(await service.isLoaded({ env: process.env })))
+      (!restartWasScheduled &&
+        loaded &&
+        !(await service.isLoaded({ env: process.env })))
     ) {
       const progress = prompter.progress("Gateway service");
       let installError: string | null = null;
@@ -192,15 +207,14 @@ export async function finalizeSetupWizard(
             "Fix gateway auth config/token input and rerun setup.",
           ].join(" ");
         } else {
-          const { programArguments, workingDirectory, environment } = await buildGatewayInstallPlan(
-            {
+          const { programArguments, workingDirectory, environment } =
+            await buildGatewayInstallPlan({
               env: process.env,
               port: settings.port,
               runtime: daemonRuntime,
               warn: (message, title) => prompter.note(message, title),
               config: nextConfig,
-            },
-          );
+            });
 
           progress.update("Installing Gateway service…");
           await service.install({
@@ -215,11 +229,16 @@ export async function finalizeSetupWizard(
         installError = err instanceof Error ? err.message : String(err);
       } finally {
         progress.stop(
-          installError ? "Gateway service install failed." : "Gateway service installed.",
+          installError
+            ? "Gateway service install failed."
+            : "Gateway service installed.",
         );
       }
       if (installError) {
-        await prompter.note(`Gateway service install failed: ${installError}`, "Gateway");
+        await prompter.note(
+          `Gateway service install failed: ${installError}`,
+          "Gateway",
+        );
         await prompter.note(gatewayInstallErrorHint(), "Gateway");
       }
     }
@@ -256,7 +275,8 @@ export async function finalizeSetupWizard(
       runtime.error(
         formatHealthCheckFailure(
           new Error(
-            gatewayProbe.detail ?? `gateway did not become reachable at ${probeLinks.wsUrl}`,
+            gatewayProbe.detail ??
+              `gateway did not become reachable at ${probeLinks.wsUrl}`,
           ),
         ),
       );
@@ -283,7 +303,9 @@ export async function finalizeSetupWizard(
   }
 
   const controlUiEnabled =
-    nextConfig.gateway?.controlUi?.enabled ?? baseConfig.gateway?.controlUi?.enabled ?? true;
+    nextConfig.gateway?.controlUi?.enabled ??
+    baseConfig.gateway?.controlUi?.enabled ??
+    true;
   if (!opts.skipUi && controlUiEnabled) {
     const controlUiAssets = await ensureControlUiAssetsBuilt(runtime);
     if (!controlUiAssets.ok && controlUiAssets.message) {
@@ -302,7 +324,8 @@ export async function finalizeSetupWizard(
   );
 
   const controlUiBasePath =
-    nextConfig.gateway?.controlUi?.basePath ?? baseConfig.gateway?.controlUi?.basePath;
+    nextConfig.gateway?.controlUi?.basePath ??
+    baseConfig.gateway?.controlUi?.basePath;
   const links = resolveControlUiLinks({
     bind: settings.bind,
     port: settings.port,
@@ -371,7 +394,7 @@ export async function finalizeSetupWizard(
   let controlUiOpened = false;
   let controlUiOpenHint: string | undefined;
   let seededInBackground = false;
-  let hatchChoice: "tui" | "web" | "later" | null = null;
+  let hatchChoice: "tui" | "later" | null = null;
   let launchedTui = false;
 
   if (!opts.skipUi && gatewayProbe.ok) {
@@ -403,8 +426,7 @@ export async function finalizeSetupWizard(
     hatchChoice = await prompter.select({
       message: "How do you want to hatch your bot?",
       options: [
-        { value: "tui", label: "Hatch in TUI (recommended)" },
-        { value: "web", label: "Open the Web UI" },
+        { value: "tui", label: "Hatch in TUI (best option!)" },
         { value: "later", label: "Do this later" },
       ],
       initialValue: "tui",
@@ -414,43 +436,15 @@ export async function finalizeSetupWizard(
       restoreTerminalState("pre-setup tui", { resumeStdinIfPaused: true });
       await runTui({
         url: links.wsUrl,
-        token: settings.authMode === "token" ? settings.gatewayToken : undefined,
-        password: settings.authMode === "password" ? resolvedGatewayPassword : "",
+        token:
+          settings.authMode === "token" ? settings.gatewayToken : undefined,
+        password:
+          settings.authMode === "password" ? resolvedGatewayPassword : "",
         // Safety: setup TUI should not auto-deliver to lastProvider/lastTo.
         deliver: false,
         message: hasBootstrap ? "Wake up, my friend!" : undefined,
       });
       launchedTui = true;
-    } else if (hatchChoice === "web") {
-      const browserSupport = await detectBrowserOpenSupport();
-      if (browserSupport.ok) {
-        controlUiOpened = await openUrl(authedUrl);
-        if (!controlUiOpened) {
-          controlUiOpenHint = formatControlUiSshHint({
-            port: settings.port,
-            basePath: controlUiBasePath,
-            token: settings.authMode === "token" ? settings.gatewayToken : undefined,
-          });
-        }
-      } else {
-        controlUiOpenHint = formatControlUiSshHint({
-          port: settings.port,
-          basePath: controlUiBasePath,
-          token: settings.authMode === "token" ? settings.gatewayToken : undefined,
-        });
-      }
-      await prompter.note(
-        [
-          `Dashboard link (with token): ${authedUrl}`,
-          controlUiOpened
-            ? "Opened in your browser. Keep that tab to control Vora."
-            : "Copy/paste this URL in a browser on this machine to control Vora.",
-          controlUiOpenHint,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        "Dashboard ready",
-      );
     } else {
       await prompter.note(
         `When you're ready: ${formatCliCommand("vora dashboard --no-open")}`,
@@ -515,18 +509,27 @@ export async function finalizeSetupWizard(
     );
   }
 
-  const { describeCodexNativeWebSearch } = await import("../agents/codex-native-web-search.js");
+  const { describeCodexNativeWebSearch } =
+    await import("../agents/codex-native-web-search.js");
   const codexNativeSummary = describeCodexNativeWebSearch(nextConfig);
   const webSearchProvider = nextConfig.tools?.web?.search?.provider;
   const webSearchEnabled = nextConfig.tools?.web?.search?.enabled;
-  const configuredSearchProviders = listConfiguredWebSearchProviders({ config: nextConfig });
+  const configuredSearchProviders = listConfiguredWebSearchProviders({
+    config: nextConfig,
+  });
   if (webSearchProvider) {
     const { resolveExistingKey, hasExistingKey, hasKeyInEnv } =
       await import("../commands/onboard-search.js");
-    const entry = configuredSearchProviders.find((e) => e.id === webSearchProvider);
+    const entry = configuredSearchProviders.find(
+      (e) => e.id === webSearchProvider,
+    );
     const label = entry?.label ?? webSearchProvider;
-    const storedKey = entry ? resolveExistingKey(nextConfig, webSearchProvider) : undefined;
-    const keyConfigured = entry ? hasExistingKey(nextConfig, webSearchProvider) : false;
+    const storedKey = entry
+      ? resolveExistingKey(nextConfig, webSearchProvider)
+      : undefined;
+    const keyConfigured = entry
+      ? hasExistingKey(nextConfig, webSearchProvider)
+      : false;
     const envAvailable = entry ? hasKeyInEnv(entry) : false;
     const hasKey = keyConfigured || envAvailable;
     const keySource = storedKey
@@ -584,7 +587,8 @@ export async function finalizeSetupWizard(
   } else {
     // Legacy configs may have a working key (e.g. apiKey or BRAVE_API_KEY) without
     // an explicit provider. Runtime auto-detects these, so avoid saying "skipped".
-    const { hasExistingKey, hasKeyInEnv } = await import("../commands/onboard-search.js");
+    const { hasExistingKey, hasKeyInEnv } =
+      await import("../commands/onboard-search.js");
     const legacyDetected = configuredSearchProviders.find(
       (e) => hasExistingKey(nextConfig, e.id) || hasKeyInEnv(e),
     );

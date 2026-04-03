@@ -281,6 +281,18 @@ describe("agentCommand ACP runtime routing", () => {
     });
   });
 
+  it("falls back to the embedded agent when the ACP manager is unavailable", async () => {
+    await withAcpSessionEnv(async () => {
+      getAcpSessionManagerSpy.mockReturnValue(null as never);
+
+      await expect(
+        agentCommand({ message: "ping", sessionKey: "agent:codex:acp:test" }, runtime),
+      ).resolves.toBeDefined();
+
+      expect(runEmbeddedVoraAgentSpy).toHaveBeenCalled();
+    });
+  });
+
   it("persists ACP child session history to the transcript store", async () => {
     await withAcpSessionEnvInfo(async ({ storePath }) => {
       await runAcpTurnWithTextDeltas({ chunks: ["ACP_", "OK"] });

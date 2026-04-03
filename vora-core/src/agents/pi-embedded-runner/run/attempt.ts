@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
-import { streamSimple } from "@mariozechner/pi-ai";
+import { getApiProvider, streamSimple, type Api, type Model } from "@mariozechner/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -52,6 +52,7 @@ import { resolveVoraDocsPath } from "../../docs-path.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
 import { buildModelAliasLines } from "../../model-alias-lines.js";
+import { OLLAMA_LOCAL_AUTH_MARKER } from "../../model-auth-markers.js";
 import { resolveModelAuthMode } from "../../model-auth.js";
 import { resolveDefaultModelForAgent } from "../../model-selection.js";
 import { supportsModelTools } from "../../model-tool-support.js";
@@ -215,6 +216,41 @@ export {
 } from "./attempt.tool-call-normalization.js";
 
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
+const OLLAMA_COMPAT_BASE_URL = "http://127.0.0.1:11434";
+
+function resolveOllamaCompatBaseUrl(baseUrl?: string): string {
+  const trimmed = (baseUrl?.trim() || OLLAMA_COMPAT_BASE_URL).replace(/\/+$/u, "");
+  if (!trimmed) {
+    return `${OLLAMA_COMPAT_BASE_URL}/v1`;
+  }
+  return trimmed.endsWith("/v1") ? trimmed : `${trimmed}/v1`;
+}
+
+function toOllamaOpenAiCompatModel<TApi extends Api>(model: Model<TApi>): Model<Api> {
+  if (model.api !== "ollama") {
+    return model as unknown as Model<Api>;
+  }
+  const modelWithApiKey = model as Model<TApi> & { apiKey?: unknown };
+  const runtimeApiKey =
+    typeof modelWithApiKey.apiKey === "string" && modelWithApiKey.apiKey.trim().length > 0
+      ? modelWithApiKey.apiKey
+      : OLLAMA_LOCAL_AUTH_MARKER;
+  return {
+    ...model,
+    api: "openai-completions",
+    baseUrl: resolveOllamaCompatBaseUrl(model.baseUrl),
+    apiKey: runtimeApiKey,
+  } as Model<Api>;
+}
+
+function createOllamaOpenAiCompatStreamFn(): StreamFn {
+  return (model, context, options) =>
+    streamSimple(
+      toOllamaOpenAiCompatModel(model as unknown as Model<Api>),
+      context,
+      options,
+    );
+}
 
 export function resolveEmbeddedAgentStreamFn(params: {
   currentStreamFn: StreamFn | undefined;
@@ -895,6 +931,22 @@ export async function runEmbeddedAttempt(
         agentDir,
         workspaceDir: effectiveWorkspace,
       });
+      const hasNativeApiProvider = Boolean(getApiProvider(params.model.api));
+      const ollamaCompatFallbackStreamFn =
+        !providerStreamFn && !hasNativeApiProvider && params.model.api === "ollama"
+          ? createOllamaOpenAiCompatStreamFn()
+          : undefined;
+      if (ollamaCompatFallbackStreamFn) {
+        log.warn(
+          `[ollama-compat] missing native api provider for ${params.model.api}; ` +
+            `using OpenAI-compatible transport at ${resolveOllamaCompatBaseUrl(params.model.baseUrl)}`,
+        );
+      } else if (!providerStreamFn && !hasNativeApiProvider) {
+        throw new Error(
+          `No API provider registered for api: ${params.model.api}. ` +
+            "The runtime provider plugin may be missing from this installation.",
+        );
+      }
       const shouldUseWebSocketTransport = shouldUseOpenAIWebSocketTransport({
         provider: params.provider,
         modelApi: params.model.api,
@@ -909,7 +961,7 @@ export async function runEmbeddedAttempt(
       }
       activeSession.agent.streamFn = resolveEmbeddedAgentStreamFn({
         currentStreamFn: defaultSessionStreamFn,
-        providerStreamFn,
+        providerStreamFn: providerStreamFn ?? ollamaCompatFallbackStreamFn,
         shouldUseWebSocketTransport,
         wsApiKey,
         sessionId: params.sessionId,

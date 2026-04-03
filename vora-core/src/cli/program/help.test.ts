@@ -128,6 +128,8 @@ describe("configureProgramHelp", () => {
     const help = captureHelpOutput(program);
     expect(help).toContain("BANNER-LINE");
     expect(help).toContain("Examples:");
+    expect(help).toContain("vora onboard");
+    expect(help).not.toContain("WhatsApp Web");
     expect(help).toContain("https://docs.vora.ai/cli");
   });
 

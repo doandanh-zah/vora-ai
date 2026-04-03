@@ -101,4 +101,10 @@ describe("resolvePreferredProviderForAuthChoice", () => {
     );
     expect(resolvePluginProviders).not.toHaveBeenCalled();
   });
+
+  it("resolves builtin ollama without plugin manifests", async () => {
+    await expect(resolvePreferredProviderForAuthChoice({ choice: "ollama" })).resolves.toBe(
+      "ollama",
+    );
+  });
 });

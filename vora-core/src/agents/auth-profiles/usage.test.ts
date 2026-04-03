@@ -205,6 +205,18 @@ describe("isProfileInCooldown", () => {
     // should keep the profile blocked for all models.
     expect(isProfileInCooldown(store, "github-copilot:github", undefined, "gpt-4.1")).toBe(true);
   });
+
+  it("does not bypass model-scoped rate limits for openai-codex profiles", () => {
+    const store = makeStore({
+      "openai-codex:default": {
+        cooldownUntil: Date.now() + 60_000,
+        cooldownReason: "rate_limit",
+        cooldownModel: "gpt-5.4",
+      },
+    });
+
+    expect(isProfileInCooldown(store, "openai-codex:default", undefined, "gpt-5.2")).toBe(true);
+  });
 });
 
 describe("resolveProfilesUnavailableReason", () => {

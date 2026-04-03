@@ -96,18 +96,24 @@ type TrimBootstrapResult = {
   originalLength: number;
 };
 
-export function resolveBootstrapMaxChars(cfg?: VoraConfig): number {
+export function resolveBootstrapMaxChars(cfg?: VoraConfig, provider?: string): number {
   const raw = cfg?.agents?.defaults?.bootstrapMaxChars;
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
     return Math.floor(raw);
   }
+  if (provider === "groq") {
+    return 4_000;
+  }
   return DEFAULT_BOOTSTRAP_MAX_CHARS;
 }
 
-export function resolveBootstrapTotalMaxChars(cfg?: VoraConfig): number {
+export function resolveBootstrapTotalMaxChars(cfg?: VoraConfig, provider?: string): number {
   const raw = cfg?.agents?.defaults?.bootstrapTotalMaxChars;
   if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
     return Math.floor(raw);
+  }
+  if (provider === "groq") {
+    return 12_000;
   }
   return DEFAULT_BOOTSTRAP_TOTAL_MAX_CHARS;
 }

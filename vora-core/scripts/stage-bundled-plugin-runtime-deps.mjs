@@ -312,6 +312,13 @@ export function stageBundledPluginRuntimeDeps(params = {}) {
   const installAttempts = params.installAttempts ?? 3;
   for (const pluginDir of listBundledPluginRuntimeDirs(repoRoot)) {
     const pluginId = path.basename(pluginDir);
+    
+    // Skip discord plugin for VORA V1
+    if (pluginId === "discord") {
+      console.log(`Skipping ${pluginId} plugin for VORA V1`);
+      continue;
+    }
+    
     const packageJson = sanitizeBundledManifestForRuntimeInstall(pluginDir);
     const nodeModulesDir = path.join(pluginDir, "node_modules");
     const stampPath = resolveRuntimeDepsStampPath(pluginDir);
