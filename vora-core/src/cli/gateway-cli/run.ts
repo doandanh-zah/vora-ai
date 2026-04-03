@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import type { Command } from "commander";
 import { readSecretFromFile } from "../../acp/secret-file.js";
-import type { GatewayAuthMode, GatewayTailscaleMode } from "../../config/config.js";
+import type {
+  GatewayAuthMode,
+  GatewayTailscaleMode,
+} from "../../config/config.js";
 import {
   CONFIG_PATH,
   loadConfig,
@@ -20,7 +24,10 @@ import { GatewayLockError } from "../../infra/gateway-lock.js";
 import { formatPortDiagnostics, inspectPortUsage } from "../../infra/ports.js";
 import { cleanStaleGatewayProcessesSync } from "../../infra/restart-stale-pids.js";
 import { detectRespawnSupervisor } from "../../infra/supervisor-markers.js";
-import { setConsoleSubsystemFilter, setConsoleTimestampPrefix } from "../../logging/console.js";
+import {
+  setConsoleSubsystemFilter,
+  setConsoleTimestampPrefix,
+} from "../../logging/console.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { defaultRuntime } from "../../runtime.js";
 import { formatCliCommand } from "../command-format.js";
@@ -56,6 +63,7 @@ type GatewayRunOpts = {
   rawStreamPath?: unknown;
   dev?: boolean;
   reset?: boolean;
+  background?: boolean;
 };
 
 const gatewayLog = createSubsystemLogger("gateway");
@@ -83,6 +91,7 @@ const GATEWAY_RUN_BOOLEAN_KEYS = [
   "claudeCliLogs",
   "compact",
   "rawStream",
+  "background",
 ] as const;
 
 const SUPERVISED_GATEWAY_LOCK_RETRY_MS = 5000;
@@ -93,7 +102,11 @@ const GATEWAY_AUTH_MODES: readonly GatewayAuthMode[] = [
   "password",
   "trusted-proxy",
 ];
-const GATEWAY_TAILSCALE_MODES: readonly GatewayTailscaleMode[] = ["off", "serve", "funnel"];
+const GATEWAY_TAILSCALE_MODES: readonly GatewayTailscaleMode[] = [
+  "off",
+  "serve",
+  "funnel",
+];
 
 function warnInlinePasswordFlag() {
   defaultRuntime.error(
@@ -101,14 +114,16 @@ function warnInlinePasswordFlag() {
   );
 }
 
-function resolveGatewayPasswordOption(opts: GatewayRunOpts): string | undefined {
+function resolveGatewayPasswordOption(
+  opts: GatewayRunOpts,
+): string | undefined {
   const direct = toOptionString(opts.password);
   const file = toOptionString(opts.passwordFile);
   if (direct && file) {
     throw new Error("Use either --password or --password-file.");
   }
   if (file) {
-    return readSecretFromFile(file, "Gateway password");
+    return readSecretFromFile();
   }
   return direct;
 }
@@ -141,7 +156,10 @@ function formatModeErrorList<T extends string>(modes: readonly T[]): string {
   return `${quoted.slice(0, -1).join(", ")}, or ${quoted[quoted.length - 1]}`;
 }
 
-function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command): GatewayRunOpts {
+function resolveGatewayRunOptions(
+  opts: GatewayRunOpts,
+  command?: Command,
+): GatewayRunOpts {
   const resolved: GatewayRunOpts = { ...opts };
 
   for (const key of GATEWAY_RUN_VALUE_KEYS) {
@@ -165,7 +183,9 @@ function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command): Gate
 function isGatewayLockError(err: unknown): err is GatewayLockError {
   return (
     err instanceof GatewayLockError ||
-    (!!err && typeof err === "object" && (err as { name?: string }).name === "GatewayLockError")
+    (!!err &&
+      typeof err === "object" &&
+      (err as { name?: string }).name === "GatewayLockError")
   );
 }
 
@@ -194,7 +214,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
     setConsoleSubsystemFilter(["agent/cli-backend"]);
     process.env.VORA_CLI_BACKEND_LOG_OUTPUT = "1";
   }
-  const wsLogRaw = (opts.compact ? "compact" : opts.wsLog) as string | undefined;
+  const wsLogRaw = (opts.compact ? "compact" : opts.wsLog) as
+    | string
+    | undefined;
   const wsLogStyle: GatewayWsLogStyle =
     wsLogRaw === "compact" ? "compact" : wsLogRaw === "full" ? "full" : "auto";
   if (
@@ -241,7 +263,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
       ? bindRaw
       : null;
   if (!bind) {
-    defaultRuntime.error('Invalid --bind (use "loopback", "lan", "tailnet", "auto", or "custom")');
+    defaultRuntime.error(
+      'Invalid --bind (use "loopback", "lan", "tailnet", "auto", or "custom")',
+    );
     defaultRuntime.exit(1);
     return;
   }
@@ -255,11 +279,12 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   }
   if (opts.force) {
     try {
-      const { killed, waitedMs, escalatedToSigkill } = await forceFreePortAndWait(port, {
-        timeoutMs: 2000,
-        intervalMs: 100,
-        sigtermTimeoutMs: 700,
-      });
+      const { killed, waitedMs, escalatedToSigkill } =
+        await forceFreePortAndWait(port, {
+          timeoutMs: 2000,
+          intervalMs: 100,
+          sigtermTimeoutMs: 700,
+        });
       if (killed.length === 0) {
         gatewayLog.info(`force: no listeners on port ${port}`);
       } else {
@@ -269,10 +294,14 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
           );
         }
         if (escalatedToSigkill) {
-          gatewayLog.info(`force: escalated to SIGKILL while freeing port ${port}`);
+          gatewayLog.info(
+            `force: escalated to SIGKILL while freeing port ${port}`,
+          );
         }
         if (waitedMs > 0) {
-          gatewayLog.info(`force: waited ${waitedMs}ms for port ${port} to free`);
+          gatewayLog.info(
+            `force: waited ${waitedMs}ms for port ${port} to free`,
+          );
         }
       }
       // After killing, verify the port is actually bindable (handles TIME_WAIT).
@@ -290,7 +319,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
         host: bindProbeHost,
       });
       if (bindWaitMs > 0) {
-        gatewayLog.info(`force: waited ${bindWaitMs}ms for port ${port} to become bindable`);
+        gatewayLog.info(
+          `force: waited ${bindWaitMs}ms for port ${port} to become bindable`,
+        );
       }
     } catch (err) {
       defaultRuntime.error(`Force: ${String(err)}`);
@@ -307,7 +338,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   const authModeRaw = toOptionString(opts.auth);
   const authMode = parseEnumOption(authModeRaw, GATEWAY_AUTH_MODES);
   if (authModeRaw && !authMode) {
-    defaultRuntime.error(`Invalid --auth (use ${formatModeErrorList(GATEWAY_AUTH_MODES)})`);
+    defaultRuntime.error(
+      `Invalid --auth (use ${formatModeErrorList(GATEWAY_AUTH_MODES)})`,
+    );
     defaultRuntime.exit(1);
     return;
   }
@@ -335,7 +368,11 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
 
   const snapshot = await readConfigFileSnapshot().catch(() => null);
   const configExists = snapshot?.exists ?? fs.existsSync(CONFIG_PATH);
-  const configAuditPath = path.join(resolveStateDir(process.env), "logs", "config-audit.jsonl");
+  const configAuditPath = path.join(
+    resolveStateDir(process.env),
+    "logs",
+    "config-audit.jsonl",
+  );
   const effectiveCfg = snapshot?.valid ? snapshot.config : cfg;
   const mode = effectiveCfg.gateway?.mode;
   if (!opts.allowUnconfigured && mode !== "local") {
@@ -370,8 +407,10 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   const resolvedAuthMode = resolvedAuth.mode;
   const tokenValue = resolvedAuth.token;
   const passwordValue = resolvedAuth.password;
-  const hasToken = typeof tokenValue === "string" && tokenValue.trim().length > 0;
-  const hasPassword = typeof passwordValue === "string" && passwordValue.trim().length > 0;
+  const hasToken =
+    typeof tokenValue === "string" && tokenValue.trim().length > 0;
+  const hasPassword =
+    typeof passwordValue === "string" && passwordValue.trim().length > 0;
   const tokenConfigured =
     hasToken ||
     hasConfiguredSecretInput(
@@ -390,7 +429,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   const canBootstrapToken = resolvedAuthMode === "token" && !tokenConfigured;
   const authHints: string[] = [];
   if (miskeys.hasGatewayToken) {
-    authHints.push('Found "gateway.token" in config. Use "gateway.auth.token" instead.');
+    authHints.push(
+      'Found "gateway.token" in config. Use "gateway.auth.token" instead.',
+    );
   }
   if (miskeys.hasRemoteToken) {
     authHints.push(
@@ -453,6 +494,42 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
         }),
     });
 
+  // Handle background mode
+  if (opts.background) {
+    if (process.platform !== "win32") {
+      gatewayLog.info("Background mode is only supported on Windows");
+      gatewayLog.info("On Unix systems, use nohup or systemd/launchd services");
+      defaultRuntime.exit(1);
+      return;
+    }
+
+    gatewayLog.info("Starting gateway in background mode...");
+
+    // Build command line arguments without --background
+    const args = process.argv.slice(2).filter((arg) => arg !== "--background");
+
+    // Spawn new process with hidden window on Windows
+    const child = spawn(
+      "powershell",
+      [
+        "-Command",
+        `Start-Process -WindowStyle Hidden node "${process.execPath}" gateway ${args.join(" ")}"`,
+      ],
+      {
+        detached: true,
+        stdio: "ignore",
+        shell: true,
+      },
+    );
+
+    child.unref();
+
+    gatewayLog.info(`Gateway started in background (PID: ${child.pid})`);
+    gatewayLog.info("Use 'vora gateway status' to check if it's running");
+    defaultRuntime.exit(0);
+    return;
+  }
+
   try {
     const supervisor = detectRespawnSupervisor(process.env);
     while (true) {
@@ -470,7 +547,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
         gatewayLog.warn(
           `gateway already running under ${supervisor}; waiting ${SUPERVISED_GATEWAY_LOCK_RETRY_MS}ms before retrying startup`,
         );
-        await new Promise((resolve) => setTimeout(resolve, SUPERVISED_GATEWAY_LOCK_RETRY_MS));
+        await new Promise((resolve) =>
+          setTimeout(resolve, SUPERVISED_GATEWAY_LOCK_RETRY_MS),
+        );
       }
     }
   } catch (err) {
@@ -509,7 +588,10 @@ export function addGatewayRunCommand(cmd: Command): Command {
       "--token <token>",
       "Shared token required in connect.params.auth.token (default: VORA_GATEWAY_TOKEN env if set)",
     )
-    .option("--auth <mode>", `Gateway auth mode (${formatModeChoices(GATEWAY_AUTH_MODES)})`)
+    .option(
+      "--auth <mode>",
+      `Gateway auth mode (${formatModeChoices(GATEWAY_AUTH_MODES)})`,
+    )
     .option("--password <password>", "Password for auth mode=password")
     .option("--password-file <path>", "Read gateway password from file")
     .option(
@@ -526,24 +608,41 @@ export function addGatewayRunCommand(cmd: Command): Command {
       "Allow gateway start without gateway.mode=local in config",
       false,
     )
-    .option("--dev", "Create a dev config + workspace if missing (no BOOTSTRAP.md)", false)
+    .option(
+      "--dev",
+      "Create a dev config + workspace if missing (no BOOTSTRAP.md)",
+      false,
+    )
     .option(
       "--reset",
       "Reset dev config + credentials + sessions + workspace (requires --dev)",
       false,
     )
-    .option("--force", "Kill any existing listener on the target port before starting", false)
+    .option(
+      "--force",
+      "Kill any existing listener on the target port before starting",
+      false,
+    )
     .option("--verbose", "Verbose logging to stdout/stderr", false)
     .option(
       "--cli-backend-logs",
       "Only show CLI backend logs in the console (includes stdout/stderr)",
       false,
     )
-    .option("--claude-cli-logs", "Deprecated alias for --cli-backend-logs", false)
-    .option("--ws-log <style>", 'WebSocket log style ("auto"|"full"|"compact")', "auto")
+    .option(
+      "--claude-cli-logs",
+      "Deprecated alias for --cli-backend-logs",
+      false,
+    )
+    .option(
+      "--ws-log <style>",
+      'WebSocket log style ("auto"|"full"|"compact")',
+      "auto",
+    )
     .option("--compact", 'Alias for "--ws-log compact"', false)
     .option("--raw-stream", "Log raw model stream events to jsonl", false)
     .option("--raw-stream-path <path>", "Raw stream jsonl path")
+    .option("--background", "Run gateway in background (hidden window)", false)
     .action(async (opts, command) => {
       await runGatewayCommand(resolveGatewayRunOptions(opts, command));
     });

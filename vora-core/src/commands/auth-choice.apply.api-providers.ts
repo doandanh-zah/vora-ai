@@ -382,30 +382,118 @@ async function applyAuthChoiceOllama(
     return null;
   }
 
-  // Check if Ollama is installed
-  if (!checkOllamaInstalled()) {
-    const installSuccess = await autoInstallOllama(params.prompter);
-    if (!installSuccess) {
+  // NEW FLOW: Ask if user has Ollama installed
+  const hasOllama = await params.prompter.confirm({
+    message: "🤖 Do you have Ollama installed on this computer yet?",
+    initialValue: false,
+  });
+
+  if (!hasOllama) {
+    // Ask about platform
+    const platform = await params.prompter.select({
+      message: "💻 What operating system are you using?",
+      options: [
+        { value: "mac", label: "macOS", hint: "Apple Mac computers" },
+        { value: "linux", label: "Linux", hint: "Ubuntu, Debian, etc." },
+        { value: "windows", label: "Windows", hint: "Windows 10/11" },
+      ],
+    });
+
+    if (platform === "mac" || platform === "linux") {
       await params.prompter.note(
         [
-          "❌ Cannot proceed without Ollama.",
+          "🚀 Installing Ollama automatically...",
           "",
-          "Please install manually and restart this setup:",
-          "curl -fsSL https://ollama.ai/install.sh | sh",
-          "",
-          "After installation, run: ollama serve",
+          "Running: curl -fsSL https://ollama.ai/install.sh | sh",
+          "Please wait for installation to complete...",
         ].join("\n"),
-        "Ollama Required",
+        "Installing Ollama",
+      );
+
+      try {
+        const installResult = spawnSync(
+          "curl",
+          ["-fsSL", "https://ollama.ai/install.sh", "|", "sh"],
+          {
+            encoding: "utf8",
+            stdio: "pipe",
+            shell: true,
+          },
+        );
+
+        if (installResult.status !== 0) {
+          throw new Error(`Install failed: ${installResult.stderr}`);
+        }
+
+        await params.prompter.note(
+          [
+            "✅ Ollama installed successfully!",
+            "",
+            "🚀 Starting Ollama server...",
+            "Please run this in a NEW terminal:",
+            "ollama serve",
+            "",
+            "💡 Keep Ollama running while using VORA.",
+          ].join("\n"),
+          "Ollama Ready",
+        );
+      } catch (error) {
+        await params.prompter.note(
+          [
+            "❌ Auto-installation failed.",
+            "",
+            "Please install manually:",
+            "curl -fsSL https://ollama.ai/install.sh | sh",
+            "",
+            `Error: ${error instanceof Error ? error.message : String(error)}`,
+          ].join("\n"),
+          "Installation Failed",
+        );
+        return null;
+      }
+    } else if (platform === "windows") {
+      await params.prompter.note(
+        [
+          "🪟 For Windows, please install Ollama manually:",
+          "",
+          "1. Visit: https://ollama.ai/download",
+          "2. Download and run the Windows installer",
+          "3. After installation, run: ollama serve",
+          "",
+          "💡 Keep Ollama running in a separate terminal while using VORA.",
+          "",
+          "🚀 Once Ollama is installed and running, restart this setup.",
+        ].join("\n"),
+        "Windows Installation Required",
       );
       return null;
     }
+  }
+
+  // Check if Ollama is actually running
+  let discoveredModels: string[] = [];
+  try {
+    discoveredModels = await discoverOllamaModelIds(OLLAMA_DEFAULT_BASE_URL);
+  } catch (error) {
+    await params.prompter.note(
+      [
+        "❌ Cannot connect to Ollama server.",
+        "",
+        "Please make sure Ollama is running:",
+        "ollama serve",
+        "",
+        `Error: ${error instanceof Error ? error.message : String(error)}`,
+      ].join("\n"),
+      "Ollama Not Running",
+    );
+    return null;
   }
 
   await params.prompter.note(
     [
       "🦙 Ollama runs fully local on this machine - 100% FREE!",
       "",
-      "✅ Ollama is installed and ready to use.",
+      "✅ Ollama is installed and running.",
       "",
       "💡 Popular free models:",
       "- llama3.2 (3B/8B) - Fast & capable",
@@ -429,14 +517,6 @@ async function applyAuthChoiceOllama(
     },
   });
   const baseUrl = normalizeOllamaBaseUrl(baseUrlInput);
-
-  // Check available models before prompting
-  let discoveredModels: string[] = [];
-  try {
-    discoveredModels = await discoverOllamaModelIds(baseUrl);
-  } catch {
-    // Ollama might not be running yet
-  }
 
   const modelId = await promptOllamaModelId({
     prompter: params.prompter,
@@ -539,10 +619,18 @@ async function applyAuthChoiceGroq(
 
   await params.prompter.note(
     [
-      "Groq provides blazing fast inference for free.",
-      "Get your API key at: https://console.groq.com/keys",
+      "⚡ Groq provides blazing fast inference for free.",
+      "",
+      "🚨 QUOTA WARNING:",
+      "- Free tier: 30 requests/minute",
+      "- Daily limit applies",
+      "- For testing only, not production",
+      "",
+      "💡 Get your API key at: https://console.groq.com/keys",
+      "",
+      "📝 To save quota, use Ollama (FREE unlimited) instead!",
     ].join("\n"),
-    "Groq",
+    "Groq API",
   );
 
   let key = params.opts?.groqApiKey || params.opts?.token;
@@ -557,6 +645,7 @@ async function applyAuthChoiceGroq(
     ).trim();
   }
 
+  // Use smaller, more efficient model to save quota
   const defaultModel = "groq/llama-3.1-8b-instant";
   const resolvedAgentId =
     params.agentId ?? resolveDefaultAgentId(params.config);
@@ -581,6 +670,7 @@ async function applyAuthChoiceGroq(
     ? existingProvider.models
     : [];
 
+  // Use model with lower cost and better quota efficiency
   const modelDefinition: ModelDefinitionConfig = {
     id: "llama-3.1-8b-instant",
     name: "llama-3.1-8b-instant",
@@ -589,7 +679,7 @@ async function applyAuthChoiceGroq(
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
-    maxTokens: 8192,
+    maxTokens: 4096, // Reduced from 8192 to save quota
   };
 
   const nextModels = [
