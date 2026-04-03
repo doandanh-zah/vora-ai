@@ -449,6 +449,25 @@ export async function applyNonInteractiveAuthChoice(params: {
     return nextConfig;
   }
 
+  // Apply bootstrap limits to existing config for performance
+  if (authChoice === "update-bootstrap-limits") {
+    nextConfig = {
+      ...nextConfig,
+      agents: {
+        ...nextConfig.agents,
+        defaults: {
+          ...nextConfig.agents?.defaults,
+          // Reduce bootstrap limits for embedded mode to prevent timeout
+          bootstrapMaxChars: 1500,
+          bootstrapTotalMaxChars: 4000,
+          // Enable light context for TUI to minimize system prompt
+          lightContext: true,
+        },
+      },
+    };
+    return nextConfig;
+  }
+
   if (
     authChoice === "oauth" ||
     authChoice === "chutes" ||
