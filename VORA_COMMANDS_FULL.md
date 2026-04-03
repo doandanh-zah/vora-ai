@@ -45,7 +45,7 @@ Windows PowerShell:
 Get-Command vora
 ```
 
-## 3) Cac lenh user da test (2026-04-02)
+## 3) Cac lenh user da test (2026-04-03)
 
 ### Doctor
 
@@ -142,14 +142,14 @@ vora --version
 ### macOS / Linux / WSL
 
 ```bash
-npm i -g --force /path/to/vora-ai-0.1.2.tgz
+npm i -g --force /path/to/vora-ai-0.1.17.tgz
 vora --version
 ```
 
 ### Windows PowerShell
 
 ```powershell
-npm i -g --force "C:\path\to\vora-ai-0.1.2.tgz"
+npm i -g --force "C:\path\to\vora-ai-0.1.17.tgz"
 vora --version
 ```
 
@@ -198,13 +198,59 @@ vora gateway --port 19001 restart
 vora gateway --port 19001 status
 ```
 
-## 10) Lenh nhanh 1 dong (macOS / Linux)
+## 10) Ollama Setup (FREE AI - Recommended for beginners)
+
+### Auto-install (Recommended for non-tech users)
+
+```bash
+vora configure
+# Select "Ollama (Local/Free)"
+# Answer Y/n to auto-install and pull model
+# Open new terminal: ollama serve
+```
+
+### Manual setup (Advanced users)
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start server
+ollama serve
+
+# Pull model (choose one)
+ollama pull llama3.2        # All-purpose
+ollama pull qwen2.5:7b      # Great for coding
+ollama pull deepseek-coder  # Code specialist
+
+# Configure VORA
+vora configure
+# Select "Ollama (Local/Free)"
+# Choose your model
+```
+
+### Verify Ollama setup
+
+```bash
+# Check Ollama status
+ollama list
+
+# Check VORA models
+vora models list
+
+# Test connection
+vora models status --probe --probe-provider ollama
+```
+
+## 11) Lenh nhanh 1 dong (macOS / Linux)
 
 ```bash
 npm i -g vora-ai@latest && vora --version
 ```
 
-## 11) Ghi chu
+## 12) Ghi chu
 
 - Day la tai lieu cho nguoi dung cuoi, khong bao gom lenh publish/build noi bo.
 - Package install chuan: `vora-ai`.
+- Latest version: `0.1.17` (supports auto-install Ollama).
+- Ollama is FREE and runs locally - perfect for privacy and cost savings.
