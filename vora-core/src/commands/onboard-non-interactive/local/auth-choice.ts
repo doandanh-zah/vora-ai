@@ -21,14 +21,7 @@ import {
   isDeprecatedAuthChoice,
 } from "../../auth-choice-legacy.js";
 import { normalizeSecretInputModeInput } from "../../auth-choice.apply-helpers.js";
-import {
-  discoverOllamaModelIds,
-  mergeOllamaProviderConfig,
-  normalizeApiKeyTokenProviderAuthChoice,
-  normalizeOllamaBaseUrl,
-  OLLAMA_DEFAULT_BASE_URL,
-  OLLAMA_PROFILE_ID,
-} from "../../auth-choice.apply.api-providers.js";
+import { normalizeApiKeyTokenProviderAuthChoice } from "../../auth-choice.apply.api-providers.js";
 import {
   applyCustomApiConfig,
   CustomApiError,
@@ -271,70 +264,6 @@ export async function applyNonInteractiveAuthChoice(params: {
     }
   }
 
-  if (authChoice === "ollama") {
-    const baseUrl = normalizeOllamaBaseUrl(
-      opts.customBaseUrl ?? OLLAMA_DEFAULT_BASE_URL,
-    );
-    let modelId = opts.customModelId?.trim();
-    if (!modelId) {
-      try {
-        modelId = (await discoverOllamaModelIds(baseUrl))[0];
-      } catch {
-        modelId = undefined;
-      }
-    }
-    if (!modelId) {
-      runtime.error(
-        [
-          'Auth choice "ollama" requires a local Ollama model.',
-          "Run `ollama serve`, pull a model such as `ollama pull qwen3:4b`, then retry.",
-          "Non-interactive fallback: pass --custom-model-id <model>.",
-        ].join("\n"),
-      );
-      runtime.exit(1);
-      return null;
-    }
-
-    const resolvedAgentId = resolveDefaultAgentId(nextConfig);
-    const agentDir = resolveAgentDir(nextConfig, resolvedAgentId, process.env);
-    upsertAuthProfile({
-      profileId: OLLAMA_PROFILE_ID,
-      credential: {
-        type: "api_key",
-        provider: "ollama",
-        key: OLLAMA_LOCAL_AUTH_MARKER,
-      },
-      agentDir,
-    });
-
-    nextConfig = mergeOllamaProviderConfig({
-      config: nextConfig,
-      baseUrl,
-      modelId,
-    });
-    nextConfig = applyAuthProfileConfig(nextConfig, {
-      profileId: OLLAMA_PROFILE_ID,
-      provider: "ollama",
-      mode: "api_key",
-    });
-    nextConfig = applyPrimaryModel(nextConfig, `ollama/${modelId}`);
-
-    // Reduce bootstrap limits for embedded mode to prevent timeout
-    nextConfig = {
-      ...nextConfig,
-      agents: {
-        ...nextConfig.agents,
-        defaults: {
-          ...nextConfig.agents?.defaults,
-          bootstrapMaxChars: 1500,
-          bootstrapTotalMaxChars: 4000,
-        },
-      },
-    };
-
-    return nextConfig;
-  }
-
   if (authChoice === "groq-api-key") {
     const resolved = await resolveApiKey({
       provider: "groq",
@@ -460,8 +389,6 @@ export async function applyNonInteractiveAuthChoice(params: {
           // Reduce bootstrap limits for embedded mode to prevent timeout
           bootstrapMaxChars: 1500,
           bootstrapTotalMaxChars: 4000,
-          // Enable light context for TUI to minimize system prompt
-          lightContext: true,
         },
       },
     };

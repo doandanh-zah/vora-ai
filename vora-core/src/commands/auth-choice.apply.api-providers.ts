@@ -3,7 +3,6 @@ import {
   resolveDefaultAgentId,
 } from "../agents/agent-scope.js";
 import { upsertAuthProfile } from "../agents/auth-profiles.js";
-import { OLLAMA_LOCAL_AUTH_MARKER } from "../agents/model-auth-markers.js";
 import type {
   ModelDefinitionConfig,
   ModelProviderConfig,
@@ -23,15 +22,9 @@ import type {
 import { applyDefaultModelChoice } from "./auth-choice.default-model.js";
 import type { AuthChoice } from "./onboard-types.js";
 
-export const OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434";
-const OLLAMA_DEFAULT_CONTEXT_WINDOW = 128_000;
-const OLLAMA_DEFAULT_MAX_TOKENS = 8_192;
-export const OLLAMA_PROFILE_ID = "ollama:default";
-const OLLAMA_DISCOVERY_TIMEOUT_MS = 10_000;
 
 function checkOllamaInstalled(): boolean {
   try {
-    const result = spawnSync("ollama", ["--version"], {
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -68,7 +61,6 @@ async function tryStartOllamaServeInBackground(params: {
   await params.prompter.note(
     [
       "Could not reach Ollama API yet.",
-      "Trying to start Ollama automatically in the background: ollama serve",
     ].join("\n"),
     "Ollama",
   );
@@ -80,11 +72,9 @@ async function tryStartOllamaServeInBackground(params: {
           [
             "-NoProfile",
             "-Command",
-            "Start-Process -FilePath ollama -ArgumentList 'serve' -WindowStyle Hidden",
           ],
           { encoding: "utf8", stdio: "pipe" },
         )
-      : spawnSync("sh", ["-c", "nohup ollama serve >/dev/null 2>&1 &"], {
           encoding: "utf8",
           stdio: "pipe",
         });
@@ -100,7 +90,6 @@ async function tryStartOllamaServeInBackground(params: {
       const response = await fetchWithTimeout(
         tagsUrl,
         { method: "GET" },
-        Math.max(1500, Math.floor(OLLAMA_DISCOVERY_TIMEOUT_MS / 6)),
       );
       if (response.ok) {
         await params.prompter.note(
@@ -158,7 +147,6 @@ async function autoInstallOllama(
         "powershell",
         [
           "-Command",
-          "iwr -useb https://ollama.ai/install.ps1 -OutFile ollama-install.ps1; Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; ./ollama-install.ps1",
         ],
         {
           encoding: "utf8",
@@ -170,7 +158,6 @@ async function autoInstallOllama(
       // Unix/Linux installation
       installResult = spawnSync(
         "curl",
-        ["-fsSL", "https://ollama.ai/install.sh", "|", "sh"],
         {
           encoding: "utf8",
           stdio: "pipe",
@@ -202,8 +189,6 @@ async function autoInstallOllama(
         "",
         "Please install manually:",
         isWindows
-          ? "Visit https://ollama.ai/download"
-          : "curl -fsSL https://ollama.ai/install.sh | sh",
         "",
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       ].join("\n"),
@@ -236,7 +221,6 @@ async function autoPullModel(
   );
 
   try {
-    const pullResult = spawnSync("ollama", ["pull", modelId], {
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -261,7 +245,6 @@ async function autoPullModel(
         `❌ Failed to download model: ${modelId}`,
         "",
         "You can download it manually later:",
-        `ollama pull ${modelId}`,
         "",
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       ].join("\n"),
@@ -280,7 +263,6 @@ type OllamaTagsResponse = {
 
 export function normalizeOllamaBaseUrl(raw: string | undefined): string {
   const trimmed = String(raw ?? "").trim();
-  const candidate = trimmed || OLLAMA_DEFAULT_BASE_URL;
   const normalized = candidate.replace(/\/+$/u, "");
   if (normalized.endsWith("/v1")) {
     return normalized.slice(0, -3);
@@ -317,12 +299,9 @@ function buildOllamaModelDefinition(modelId: string): ModelDefinitionConfig {
   return {
     id: modelId,
     name: modelId,
-    api: "ollama",
     reasoning: isReasoningOllamaModel(modelId),
     input: isVisionOllamaModel(modelId) ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: OLLAMA_DEFAULT_CONTEXT_WINDOW,
-    maxTokens: OLLAMA_DEFAULT_MAX_TOKENS,
   };
 }
 
@@ -333,7 +312,6 @@ export async function discoverOllamaModelIds(
   const response = await fetchWithTimeout(
     tagsUrl,
     { method: "GET" },
-    OLLAMA_DISCOVERY_TIMEOUT_MS,
   );
   if (!response.ok) {
     throw new Error(`Ollama returned HTTP ${response.status} for ${tagsUrl}`);
@@ -352,7 +330,6 @@ export function mergeOllamaProviderConfig(params: {
   baseUrl: string;
   modelId: string;
 }): ApplyAuthChoiceParams["config"] {
-  const existingProvider = params.config.models?.providers?.ollama as
     | ModelProviderConfig
     | undefined;
   const modelDefinition = buildOllamaModelDefinition(params.modelId);
@@ -372,10 +349,8 @@ export function mergeOllamaProviderConfig(params: {
       ...params.config.models,
       providers: {
         ...params.config.models?.providers,
-        ollama: {
           ...existingProvider,
           baseUrl: params.baseUrl,
-          api: "ollama",
           models: nextModels,
         },
       },
@@ -447,13 +422,8 @@ async function promptOllamaModelId(params: {
         "🤖 No local Ollama models detected yet.",
         "",
         "🚀 Quick start commands:",
-        "curl -fsSL https://ollama.ai/install.sh | sh",
-        "ollama serve",
         "",
         "📦 Pull your first model (pick one):",
-        "ollama pull llama3.2        # All-purpose",
-        "ollama pull qwen2.5:7b      # Great for coding",
-        "ollama pull deepseek-coder  # Code specialist",
         "",
         "💡 After pulling, restart this setup!",
       ].join("\n"),
@@ -471,165 +441,6 @@ async function promptOllamaModelId(params: {
   ).trim();
 }
 
-async function applyAuthChoiceOllama(
-  params: ApplyAuthChoiceParams,
-): Promise<ApplyAuthChoiceResult | null> {
-  if (params.authChoice !== "ollama") {
-    return null;
-  }
-
-  const hasOllama = await params.prompter.confirm({
-    message: "Do you already have Ollama installed on this desktop?",
-    initialValue: false,
-  });
-
-  if (!hasOllama) {
-    const platform = await params.prompter.select({
-      message: "Are you using macOS/Linux or Windows?",
-      options: [
-        { value: "mac-linux", label: "macOS/Linux", hint: "Auto-install supported" },
-        { value: "windows", label: "Windows", hint: "Manual install required" },
-      ],
-    });
-
-    if (platform === "mac-linux") {
-      await params.prompter.note(
-        [
-          "Running: curl -fsSL https://ollama.ai/install.sh | sh",
-          "Installing Ollama automatically. Please wait...",
-        ].join("\n"),
-        "Installing Ollama",
-      );
-
-      try {
-        const installResult = spawnSync(
-          "sh",
-          ["-c", "curl -fsSL https://ollama.ai/install.sh | sh"],
-          {
-            encoding: "utf8",
-            stdio: "pipe",
-          },
-        );
-
-        if (installResult.status !== 0) {
-          throw new Error(`Install failed: ${installResult.stderr}`);
-        }
-
-        await params.prompter.note(
-          [
-            "Ollama installed successfully.",
-            "Run this in a new terminal:",
-            "ollama serve",
-            "",
-            "Keep Ollama running while using VORA.",
-          ].join("\n"),
-          "Ollama Ready",
-        );
-      } catch (error) {
-        await params.prompter.note(
-          [
-            "Automatic install failed.",
-            "Please install manually:",
-            "curl -fsSL https://ollama.ai/install.sh | sh",
-            "",
-            `Error: ${error instanceof Error ? error.message : String(error)}`,
-          ].join("\n"),
-          "Installation Failed",
-        );
-        return { config: params.config, skipModelSelection: true };
-      }
-    } else if (platform === "windows") {
-      await params.prompter.note(
-        [
-          "For Windows, install Ollama manually:",
-          "1. Open https://ollama.ai/download",
-          "2. Download and run the Windows installer",
-          "3. Start Ollama: ollama serve",
-          "",
-          "After Ollama is running, start onboarding again.",
-        ].join("\n"),
-        "Windows Installation Required",
-      );
-      return { config: params.config, skipModelSelection: true };
-    }
-  }
-
-  await params.prompter.note(
-    [
-      "Ollama runs fully local on this machine.",
-      "If needed, start it first with: ollama serve",
-    ].join("\n"),
-    "Ollama",
-  );
-
-  const baseUrlInput = await params.prompter.text({
-    message: "Ollama base URL",
-    initialValue: OLLAMA_DEFAULT_BASE_URL,
-    placeholder: OLLAMA_DEFAULT_BASE_URL,
-    validate: (value) => {
-      try {
-        new URL(normalizeOllamaBaseUrl(value));
-        return undefined;
-      } catch {
-        return "Please enter a valid Ollama URL";
-      }
-    },
-  });
-  const baseUrl = normalizeOllamaBaseUrl(baseUrlInput);
-
-  const modelId = await promptOllamaModelId({
-    prompter: params.prompter,
-    baseUrl,
-  });
-  const defaultModel = `ollama/${modelId}`;
-
-  const resolvedAgentId =
-    params.agentId ?? resolveDefaultAgentId(params.config);
-  const agentDir =
-    params.agentDir ??
-    resolveAgentDir(params.config, resolvedAgentId, params.env ?? process.env);
-  upsertAuthProfile({
-    profileId: OLLAMA_PROFILE_ID,
-    credential: {
-      type: "api_key",
-      provider: "ollama",
-      key: OLLAMA_LOCAL_AUTH_MARKER,
-    },
-    agentDir,
-  });
-
-  let nextConfig = mergeOllamaProviderConfig({
-    config: params.config,
-    baseUrl,
-    modelId,
-  });
-  nextConfig = applyAuthProfileConfig(nextConfig, {
-    profileId: OLLAMA_PROFILE_ID,
-    provider: "ollama",
-    mode: "api_key",
-  });
-
-  // Final instructions for starting Ollama
-  await params.prompter.note(
-    [
-      "Final step: keep Ollama running in another terminal.",
-      "Command:",
-      "ollama serve",
-    ].join("\n"),
-    "Final Setup",
-  );
-
-  return await applyDefaultModelChoice({
-    config: nextConfig,
-    setDefaultModel: params.setDefaultModel,
-    defaultModel,
-    applyDefaultConfig: (config) => applyPrimaryModel(config, defaultModel),
-    applyProviderConfig: (config) => config,
-    noteDefault: defaultModel,
-    noteAgentModel: createAuthChoiceAgentModelNoter(params),
-    prompter: params.prompter,
-  });
-}
 
 export function normalizeApiKeyTokenProviderAuthChoice(params: {
   authChoice: AuthChoice;
@@ -788,7 +599,7 @@ export async function applyAuthChoiceApiProviders(
 ): Promise<ApplyAuthChoiceResult | null> {
   const handlers: Array<
     (params: ApplyAuthChoiceParams) => Promise<ApplyAuthChoiceResult | null>
-  > = [applyAuthChoiceOllama, applyAuthChoiceGroq];
+  > = [applyAuthChoiceGroq];
   for (const handler of handlers) {
     const result = await handler(params);
     if (result) {
