@@ -94,7 +94,9 @@ describe("registerProviderStreamForModel", () => {
         apiKey: "ollama-local",
       }),
       expect.anything(),
-      expect.anything(),
+      expect.objectContaining({
+        apiKey: "ollama-local",
+      }),
     );
   });
 
@@ -121,7 +123,36 @@ describe("registerProviderStreamForModel", () => {
         apiKey: "custom-ollama-key",
       }),
       expect.anything(),
+      expect.objectContaining({
+        apiKey: "custom-ollama-key",
+      }),
+    );
+  });
+
+  it("preserves explicit options apiKey when using built-in Ollama fallback transport", () => {
+    resolveProviderStreamFn.mockReturnValueOnce(undefined);
+    streamSimple.mockReturnValueOnce("ok");
+    const model = createModel({
+      api: "ollama",
+      provider: "ollama",
+      baseUrl: "http://127.0.0.1:11434",
+    });
+
+    const result = registerProviderStreamForModel({ model });
+
+    expect(result).toBeTypeOf("function");
+    result?.(
+      model as never,
+      { messages: [] } as never,
+      { apiKey: "runtime-ollama-key" } as never,
+    );
+
+    expect(streamSimple).toHaveBeenCalledWith(
       expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        apiKey: "runtime-ollama-key",
+      }),
     );
   });
 

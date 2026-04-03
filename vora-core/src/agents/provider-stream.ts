@@ -25,12 +25,13 @@ function toOllamaOpenAiCompatModel<TApi extends Api>(model: Model<TApi>): Model<
       ? modelWithApiKey.apiKey
       : OLLAMA_LOCAL_AUTH_MARKER;
 
-  return {
+  const compatModel = {
     ...(model as Model<Api>),
     api: OLLAMA_OPENAI_COMPAT_API,
     baseUrl: resolveOllamaCompatBaseUrl(model.baseUrl),
-    apiKey: runtimeApiKey,
-  };
+  } as Model<Api> & { apiKey?: string };
+  compatModel.apiKey = runtimeApiKey;
+  return compatModel;
 }
 
 function createBuiltInOllamaCompatStreamFn<TApi extends Api>(model: Model<TApi>): StreamFn | undefined {
@@ -38,8 +39,23 @@ function createBuiltInOllamaCompatStreamFn<TApi extends Api>(model: Model<TApi>)
     return undefined;
   }
 
-  return (runModel, context, options) =>
-    streamSimple(toOllamaOpenAiCompatModel(runModel as Model<Api>), context, options);
+  return (runModel, context, options) => {
+    const compatModel = toOllamaOpenAiCompatModel(runModel as Model<Api>);
+    const compatModelWithApiKey = compatModel as Model<Api> & { apiKey?: unknown };
+    const compatModelApiKey =
+      typeof compatModelWithApiKey.apiKey === "string" &&
+      compatModelWithApiKey.apiKey.trim().length > 0
+        ? compatModelWithApiKey.apiKey
+        : undefined;
+    const optionApiKey =
+      typeof options?.apiKey === "string" && options.apiKey.trim().length > 0
+        ? options.apiKey
+        : compatModelApiKey ?? OLLAMA_LOCAL_AUTH_MARKER;
+    return streamSimple(compatModel, context, {
+      ...(options ?? {}),
+      apiKey: optionApiKey,
+    });
+  };
 }
 
 export function registerProviderStreamForModel<TApi extends Api>(params: {

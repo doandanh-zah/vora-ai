@@ -1,7 +1,7 @@
 // Public ACP runtime helpers for plugins that integrate with ACP control/session state.
 
 import { __testing as managerTesting, getAcpSessionManager } from "../acp/control-plane/manager.js";
-import { __testing as registryTesting } from "../acp/runtime/registry.js";
+import * as registryRuntime from "../acp/runtime/registry.js";
 
 export { getAcpSessionManager };
 export { AcpRuntimeError, isAcpRuntimeError } from "../acp/runtime/errors.js";
@@ -25,6 +25,9 @@ export type {
 } from "../acp/runtime/types.js";
 export { readAcpSessionEntry } from "../acp/runtime/session-meta.js";
 export type { AcpSessionStoreEntry } from "../acp/runtime/session-meta.js";
+
+const registryTesting =
+  (registryRuntime as { __testing?: Record<string, unknown> }).__testing ?? {};
 
 export const __testing = {
   ...managerTesting,

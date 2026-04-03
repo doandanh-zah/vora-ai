@@ -178,7 +178,6 @@ describe("applyAuthChoiceApiProviders", () => {
     });
     expect(result?.config.tools?.profile).toBe("minimal");
     expect(result?.config.agents?.defaults?.thinkingDefault).toBe("off");
-    expect(result?.config.agents?.defaults?.reasoningDefault).toBe("off");
     expect(result?.config.agents?.defaults?.model).toEqual({
       primary: "groq/llama-3.1-8b-instant",
     });
@@ -202,7 +201,6 @@ describe("applyAuthChoiceApiProviders", () => {
         agents: {
           defaults: {
             thinkingDefault: "minimal",
-            reasoningDefault: "stream",
           },
         },
         tools: { profile: "full" },
@@ -219,6 +217,5 @@ describe("applyAuthChoiceApiProviders", () => {
     expect(result).not.toBeNull();
     expect(result?.config.tools?.profile).toBe("full");
     expect(result?.config.agents?.defaults?.thinkingDefault).toBe("minimal");
-    expect(result?.config.agents?.defaults?.reasoningDefault).toBe("stream");
   });
 });

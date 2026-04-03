@@ -649,7 +649,6 @@ async function applyAuthChoiceGroq(
       defaults: {
         ...params.config.agents?.defaults,
         thinkingDefault: params.config.agents?.defaults?.thinkingDefault ?? "off",
-        reasoningDefault: params.config.agents?.defaults?.reasoningDefault ?? "off",
       },
     },
     tools: {

@@ -235,21 +235,33 @@ function toOllamaOpenAiCompatModel<TApi extends Api>(model: Model<TApi>): Model<
     typeof modelWithApiKey.apiKey === "string" && modelWithApiKey.apiKey.trim().length > 0
       ? modelWithApiKey.apiKey
       : OLLAMA_LOCAL_AUTH_MARKER;
-  return {
+  const compatModel = {
     ...model,
     api: "openai-completions",
     baseUrl: resolveOllamaCompatBaseUrl(model.baseUrl),
-    apiKey: runtimeApiKey,
-  } as Model<Api>;
+  } as Model<Api> & { apiKey?: string };
+  compatModel.apiKey = runtimeApiKey;
+  return compatModel as Model<Api>;
 }
 
 function createOllamaOpenAiCompatStreamFn(): StreamFn {
-  return (model, context, options) =>
-    streamSimple(
-      toOllamaOpenAiCompatModel(model as unknown as Model<Api>),
-      context,
-      options,
-    );
+  return (model, context, options) => {
+    const compatModel = toOllamaOpenAiCompatModel(model as unknown as Model<Api>);
+    const compatModelWithApiKey = compatModel as Model<Api> & { apiKey?: unknown };
+    const compatModelApiKey =
+      typeof compatModelWithApiKey.apiKey === "string" &&
+      compatModelWithApiKey.apiKey.trim().length > 0
+        ? compatModelWithApiKey.apiKey
+        : undefined;
+    const optionApiKey =
+      typeof options?.apiKey === "string" && options.apiKey.trim().length > 0
+        ? options.apiKey
+        : compatModelApiKey ?? OLLAMA_LOCAL_AUTH_MARKER;
+    return streamSimple(compatModel, context, {
+      ...(options ?? {}),
+      apiKey: optionApiKey,
+    });
+  };
 }
 
 export function resolveEmbeddedAgentStreamFn(params: {
