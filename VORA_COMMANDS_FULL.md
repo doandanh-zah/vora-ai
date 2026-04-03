@@ -2,14 +2,28 @@
 
 ## 1) Cai dat nhanh (khuyen nghi)
 
-### macOS / Linux / WSL
+### One liner install (Recommended)
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://heyvora.fun/install.sh | bash
+```
+
+**Windows PowerShell:**
+```powershell
+iwr -useb https://heyvora.fun/install.ps1 | iex
+```
+
+### Manual install (Alternative)
+
+**macOS / Linux / WSL:**
 
 ```bash
 npm i -g vora-ai
 vora --version
 ```
 
-### Windows PowerShell
+**Windows PowerShell:**
 
 ```powershell
 npm i -g vora-ai
@@ -242,10 +256,30 @@ vora models list
 vora models status --probe --probe-provider ollama
 ```
 
-## 11) Lenh nhanh 1 dong (macOS / Linux)
+## 11) Lenh nhanh 1 dong (heyvora.fun)
 
+### Install with heyvora.fun (Recommended)
+
+**macOS / Linux:**
 ```bash
-npm i -g vora-ai@latest && vora --version
+curl -fsSL https://heyvora.fun/install.sh | bash
+```
+
+**Windows PowerShell:**
+```powershell
+iwr -useb https://heyvora.fun/install.ps1 | iex
+```
+
+### Install + Configure with Ollama (All-in-one)
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://heyvora.fun/install.sh | bash && vora configure && echo "Select 'Ollama (Local/Free)' for FREE AI setup"
+```
+
+**Windows PowerShell:**
+```powershell
+iwr -useb https://heyvora.fun/install.ps1 | iex; vora configure; Write-Host "Select 'Ollama (Local/Free)' for FREE AI setup"
 ```
 
 ## 12) Ghi chu
