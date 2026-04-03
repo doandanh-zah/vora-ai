@@ -14,6 +14,11 @@ curl -fsSL https://heyvora.fun/install.sh | bash
 iwr -useb https://heyvora.fun/install.ps1 | iex
 ```
 
+⚠️ **Important:** After installation, open a NEW PowerShell window and run:
+```powershell
+vora --version
+```
+
 ### Manual install (Alternative)
 
 **macOS / Linux / WSL:**
@@ -281,6 +286,8 @@ curl -fsSL https://heyvora.fun/install.sh | bash && vora configure && echo "Sele
 ```powershell
 iwr -useb https://heyvora.fun/install.ps1 | iex; vora configure; Write-Host "Select 'Ollama (Local/Free)' for FREE AI setup"
 ```
+
+⚠️ **Note:** This may fail if `vora` isn't in PATH yet. If so, open NEW PowerShell after install and run `vora configure` separately.
 
 ## 12) Ghi chu
 
