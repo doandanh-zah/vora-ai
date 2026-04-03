@@ -63,16 +63,45 @@ async function autoInstallOllama(
   );
 
   try {
-    // Install Ollama
-    const installResult = spawnSync(
-      "curl",
-      ["-fsSL", "https://ollama.ai/install.sh", "|", "sh"],
-      {
-        encoding: "utf8",
-        stdio: "pipe",
-        shell: true,
-      },
-    );
+    // Detect platform and install accordingly
+    const isWindows = process.platform === "win32";
+    let installResult: any;
+
+    if (isWindows) {
+      // Windows installation
+      await prompter.note(
+        [
+          "🪟 Detected Windows system",
+          "Installing Ollama for Windows...",
+          "This will download Ollama executable.",
+        ].join("\n"),
+        "Windows Install",
+      );
+
+      installResult = spawnSync(
+        "powershell",
+        [
+          "-Command",
+          "iwr -useb https://ollama.ai/install.ps1 -OutFile ollama-install.ps1; Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force; ./ollama-install.ps1",
+        ],
+        {
+          encoding: "utf8",
+          stdio: "pipe",
+          shell: true,
+        },
+      );
+    } else {
+      // Unix/Linux installation
+      installResult = spawnSync(
+        "curl",
+        ["-fsSL", "https://ollama.ai/install.sh", "|", "sh"],
+        {
+          encoding: "utf8",
+          stdio: "pipe",
+          shell: true,
+        },
+      );
+    }
 
     if (installResult.status !== 0) {
       throw new Error(`Install failed: ${installResult.stderr}`);
@@ -87,18 +116,18 @@ async function autoInstallOllama(
       "Ollama Installed",
     );
 
-    // Start Ollama server
-    await prompter.note("🔄 Starting Ollama server...", "Starting Ollama");
-
     // Note: We'll start Ollama in background after setup
     return true;
   } catch (error) {
+    const isWindows = process.platform === "win32";
     await prompter.note(
       [
         "❌ Auto-installation failed.",
         "",
         "Please install manually:",
-        "curl -fsSL https://ollama.ai/install.sh | sh",
+        isWindows
+          ? "Visit https://ollama.ai/download"
+          : "curl -fsSL https://ollama.ai/install.sh | sh",
         "",
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       ].join("\n"),
