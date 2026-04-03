@@ -2,38 +2,28 @@
 
 ## 1) Cai dat nhanh (khuyen nghi)
 
-### One liner install (Recommended)
+### Option 1: One-liner (khong can git)
 
-**macOS / Linux:**
+#### macOS / Linux / WSL
 ```bash
-curl -fsSL https://heyvora.fun/install.sh | bash
+curl -fL https://heyvora.fun/install.sh | bash
 ```
 
-**Windows PowerShell:**
+#### Windows PowerShell
 ```powershell
-iwr -useb https://heyvora.fun/install.ps1 | iex
+powershell -c "irm https://heyvora.fun/install.ps1 | iex"
 ```
 
-**Windows WSL (Windows Subsystem for Linux):**
-```bash
-curl -fsSL https://heyvora.fun/install.sh | bash
-```
+### Option 2: NPM install
 
-⚠️ **Important:** After installation, open a NEW PowerShell window and run:
-```powershell
-vora --version
-```
-
-### Manual install (Alternative)
-
-**macOS / Linux / WSL:**
+#### macOS / Linux / WSL
 
 ```bash
 npm i -g vora-ai
 vora --version
 ```
 
-**Windows PowerShell:**
+### Windows PowerShell
 
 ```powershell
 npm i -g vora-ai
@@ -69,7 +59,7 @@ Windows PowerShell:
 Get-Command vora
 ```
 
-## 3) Cac lenh user da test (2026-04-03)
+## 3) Cac lenh user da test (2026-04-02)
 
 ### Doctor
 
@@ -166,14 +156,14 @@ vora --version
 ### macOS / Linux / WSL
 
 ```bash
-npm i -g --force /path/to/vora-ai-0.1.17.tgz
+npm i -g --force /path/to/vora-ai-0.1.2.tgz
 vora --version
 ```
 
 ### Windows PowerShell
 
 ```powershell
-npm i -g --force "C:\path\to\vora-ai-0.1.17.tgz"
+npm i -g --force "C:\path\to\vora-ai-0.1.2.tgz"
 vora --version
 ```
 
@@ -222,86 +212,13 @@ vora gateway --port 19001 restart
 vora gateway --port 19001 status
 ```
 
-## 10) Ollama Setup (FREE AI - Recommended for beginners)
-
-### Auto-install (Recommended for non-tech users)
+## 10) Lenh nhanh 1 dong (macOS / Linux)
 
 ```bash
-vora configure
-# Select "Ollama (Local/Free)"
-# Answer Y/n to auto-install and pull model
-# Open new terminal: ollama serve
+npm i -g vora-ai@latest && vora --version
 ```
 
-### Manual setup (Advanced users)
-
-```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Start server
-ollama serve
-
-# Pull model (choose one)
-ollama pull llama3.2        # All-purpose
-ollama pull qwen2.5:7b      # Great for coding
-ollama pull deepseek-coder  # Code specialist
-
-# Configure VORA
-vora configure
-# Select "Ollama (Local/Free)"
-# Choose your model
-```
-
-### Verify Ollama setup
-
-```bash
-# Check Ollama status
-ollama list
-
-# Check VORA models
-vora models list
-
-# Test connection
-vora models status --probe --probe-provider ollama
-```
-
-## 11) Lenh nhanh 1 dong (heyvora.fun)
-
-### Install with heyvora.fun (Recommended)
-
-**macOS / Linux:**
-```bash
-curl -fsSL https://heyvora.fun/install.sh | bash
-```
-
-**Windows PowerShell:**
-```powershell
-iwr -useb https://heyvora.fun/install.ps1 | iex
-```
-
-### Install + Configure with Ollama (All-in-one)
-
-**macOS / Linux:**
-```bash
-curl -fsSL https://heyvora.fun/install.sh | bash && vora configure && echo "Select 'Ollama (Local/Free)' for FREE AI setup"
-```
-
-**Windows PowerShell:**
-```powershell
-iwr -useb https://heyvora.fun/install.ps1 | iex; vora configure; Write-Host "Select 'Ollama (Local/Free)' for FREE AI setup"
-```
-
-**Windows WSL:**
-```bash
-curl -fsSL https://heyvora.fun/install.sh | bash && vora configure && echo "Select 'Ollama (Local/Free)' for FREE AI setup"
-```
-
-⚠️ **Note:** This may fail if `vora` isn't in PATH yet. If so, open NEW PowerShell after install and run `vora configure` separately.
-
-## 12) Ghi chu
+## 11) Ghi chu
 
 - Day la tai lieu cho nguoi dung cuoi, khong bao gom lenh publish/build noi bo.
 - Package install chuan: `vora-ai`.
-- Latest version: `0.1.17` (supports auto-install Ollama).
-- Ollama is FREE and runs locally - perfect for privacy and cost savings.
