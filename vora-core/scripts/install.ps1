@@ -13,13 +13,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# In PowerShell 7+, stderr from native commands (npm, git, etc.) can be promoted
+# to terminating errors when ErrorActionPreference=Stop. Disable that behavior so
+# warnings do not look like failed installs.
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
+    $global:PSNativeCommandUseErrorActionPreference = $false
+}
+
 # Colors
-$ACCENT = "`e[38;2;0;153;255m"    # coral-bright
-$SUCCESS = "`e[38;2;0;229;204m"    # cyan-bright
-$WARN = "`e[38;2;255;176;32m"     # amber
-$ERROR_COLOR = "`e[38;2;230;57;70m"     # coral-mid
-$MUTED = "`e[38;2;90;100;128m"    # text-muted
-$NC = "`e[0m"                     # No Color
+$SupportsAnsi = $false
+try {
+    if ($Host.UI -and $Host.UI.SupportsVirtualTerminal) {
+        $SupportsAnsi = $true
+    }
+} catch { }
+
+if ($SupportsAnsi) {
+    $ACCENT = "`e[38;2;0;153;255m"    # coral-bright
+    $SUCCESS = "`e[38;2;0;229;204m"   # cyan-bright
+    $WARN = "`e[38;2;255;176;32m"     # amber
+    $ERROR_COLOR = "`e[38;2;230;57;70m" # coral-mid
+    $MUTED = "`e[38;2;90;100;128m"    # text-muted
+    $NC = "`e[0m"                     # No Color
+} else {
+    $ACCENT = ""
+    $SUCCESS = ""
+    $WARN = ""
+    $ERROR_COLOR = ""
+    $MUTED = ""
+    $NC = ""
+}
 
 function Write-Host {
     param([string]$Message, [string]$Level = "info")
@@ -34,7 +57,7 @@ function Write-Host {
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "${ACCENT}  🌊 Vora Installer$NC" -Level info
+    Write-Host "${ACCENT}  Vora Installer$NC" -Level info
     Write-Host "${MUTED}  `"Hey Vora`" - The voice-first AI agent powered by Agora.$NC" -Level info
     Write-Host ""
 }
@@ -226,16 +249,30 @@ function Install-VoraNpm {
     }
     
     Write-Host "Installing Vora ($installSpec)..." -Level info
-    
+
     try {
-        # Use -ExecutionPolicy Bypass to handle restricted execution policy
-        npm install -g $installSpec --no-fund --no-audit 2>&1
-        Write-Host "Vora installed" -Level success
-        return $true
+        $npmOutput = & npm install -g $installSpec --no-fund --no-audit 2>&1
+        $exitCode = $LASTEXITCODE
     } catch {
-        Write-Host "npm install failed: $_" -Level error
+        Write-Host "npm install failed to start: $($_.Exception.Message)" -Level error
         return $false
     }
+
+    if ($exitCode -ne 0) {
+        Write-Host "npm install failed (exit code $exitCode)." -Level error
+        if ($npmOutput) {
+            $tail = @($npmOutput | Select-Object -Last 12)
+            foreach ($line in $tail) {
+                if ($line) {
+                    Write-Host "  $line" -Level error
+                }
+            }
+        }
+        return $false
+    }
+
+    Write-Host "Vora installed" -Level success
+    return $true
 }
 
 function Install-VoraGit {
