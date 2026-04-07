@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Agora Test - Basic</title>
+</head>
+<body>
+    <h1>Agora Basic Test</h1>
+    <input type="text" id="appId" placeholder="Enter Agora App ID" style="width: 300px; padding: 10px;">
+    <button onclick="testAgora()">Test Agora</button>
+    <div id="output"></div>
+    
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js?v=4.20.1"></script>
+    <script>
+        async function testAgora() {
+            const appId = document.getElementById('appId').value.trim();
+            const output = document.getElementById('output');
+            
+            if (!appId) {
+                output.innerHTML = '<p style="color: red;">Please enter App ID</p>';
+                return;
+            }
+            
+            output.innerHTML = '<p>Testing Agora...</p>';
+            
+            try {
+                console.log('=== BASIC AGORA TEST ===');
+                console.log('App ID:', appId);
+                console.log('App ID length:', appId.length);
+                
+                const client = AgoraRTC.createClient({ codec: "vp8", mode: "rtc" });
+                console.log('Client created:', client);
+                
+                const channelName = "test-channel-123";
+                console.log('Channel name:', channelName);
+                
+                const uid = await client.join(appId, null, channelName);
+                console.log('SUCCESS - UID:', uid);
+                
+                output.innerHTML = `
+                    <p style="color: green;">✅ SUCCESS!</p>
+                    <p>UID: ${uid}</p>
+                    <p>Channel: ${channelName}</p>
+                `;
+                
+                await client.leave();
+                
+            } catch (error) {
+                console.error('ERROR:', error);
+                output.innerHTML = `
+                    <p style="color: red;">❌ ERROR: ${error.message}</p>
+                    <p>Check your App ID</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

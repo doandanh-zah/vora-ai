@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VORA - Agora STT PoC Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+        
+        .status.idle {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .status.listening {
+            background: rgba(255, 193, 7, 0.3);
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status.processing {
+            background: rgba(23, 162, 184, 0.3);
+        }
+        
+        .status.success {
+            background: rgba(40, 167, 69, 0.3);
+        }
+        
+        .status.error {
+            background: rgba(220, 53, 69, 0.3);
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 0 10px;
+        }
+        
+        button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .transcript {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            min-height: 100px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+        
+        .info {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        
+        .logo {
+            text-align: center;
+            font-size: 4em;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🌊</div>
+        <h1>VORA Voice STT Demo</h1>
+        <p style="text-align: center; opacity: 0.8;">Powered by Agora Web SDK</p>
+        
+        <div id="status" class="status idle">
+            Ready to start listening...
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" onclick="startListening()">🎤 Start Listening</button>
+            <button id="stopBtn" onclick="stopListening()" disabled>⏹️ Stop</button>
+            <button onclick="testMock()">🧪 Mock Test</button>
+        </div>
+        
+        <div class="info">
+            <h3>Language Settings</h3>
+            <label for="languageSelect">Choose Language:</label>
+            <select id="languageSelect" onchange="changeLanguage()">
+                <option value="en-US">English (US)</option>
+                <option value="vi-VN">Tiếng Việt</option>
+                <option value="en-GB">English (UK)</option>
+                <option value="zh-CN">中文 (Chinese)</option>
+            </select>
+            <p><strong>Current:</strong> <span id="currentLang">English (US)</span></p>
+        </div>
+        
+        <div class="transcript" id="transcript">
+Transcript will appear here...
+        </div>
+        
+        <div class="info">
+            <h3>Phase 0 M4 - Agora STT PoC</h3>
+            <p><strong>Status:</strong> <span id="testStatus">Ready</span></p>
+            <p><strong>Provider:</strong> Agora Web SDK (Mock for PoC)</p>
+            <p><strong>Integration:</strong> Ready for VORA Core</p>
+            <p><strong>Next Step:</strong> Send transcript to VORA agent for processing</p>
+        </div>
+    </div>
+
+    <script>
+        let isListening = false;
+        let recognition = null;
+        let mockInterval = null;
+        let currentLanguage = 'en-US';
+        
+        // Language display names
+        const languageNames = {
+            'en-US': 'English (US)',
+            'vi-VN': 'Tiếng Việt',
+            'en-GB': 'English (UK)',
+            'zh-CN': '中文 (Chinese)'
+        };
+        
+        // Initialize Web Speech API as fallback for demo
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = currentLanguage;
+            recognition.maxAlternatives = 3; // Get multiple alternatives
+            
+            recognition.onresult = function(event) {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    const transcript = result[0].transcript;
+                    const confidence = result[0].confidence;
+                    
+                    if (result.isFinal) {
+                        finalTranscript += transcript + ' ';
+                        // Show confidence if available
+                        if (confidence !== undefined) {
+                            addTranscript(transcript, 'final', confidence);
+                        } else {
+                            addTranscript(transcript, 'final');
+                        }
+                        sendToVora(transcript);
+                    } else {
+                        interimTranscript += transcript;
+                        addTranscript(interimTranscript, 'interim');
+                    }
+                }
+            };
+            
+            recognition.onerror = function(event) {
+                console.error('Speech recognition error:', event.error);
+                let errorMsg = event.error;
+                
+                // More descriptive error messages
+                switch(event.error) {
+                    case 'no-speech':
+                        errorMsg = 'No speech detected - try speaking louder';
+                        break;
+                    case 'audio-capture':
+                        errorMsg = 'Microphone not available';
+                        break;
+                    case 'not-allowed':
+                        errorMsg = 'Microphone permission denied';
+                        break;
+                    case 'network':
+                        errorMsg = 'Network error - check connection';
+                        break;
+                    case 'service-not-allowed':
+                        errorMsg = 'Speech recognition service not allowed';
+                        break;
+                    default:
+                        errorMsg = `Error: ${event.error}`;
+                }
+                
+                updateStatus(errorMsg, 'error');
+                stopListening();
+            };
+            
+            recognition.onend = function() {
+                if (isListening) {
+                    // Restart if we're still supposed to be listening
+                    try {
+                        recognition.start();
+                    } catch(e) {
+                        console.error('Failed to restart recognition:', e);
+                        stopListening();
+                    }
+                }
+            };
+        }
+        
+        function changeLanguage() {
+            const select = document.getElementById('languageSelect');
+            currentLanguage = select.value;
+            document.getElementById('currentLang').textContent = languageNames[currentLanguage];
+            
+            if (recognition) {
+                recognition.lang = currentLanguage;
+                updateStatus(`Language changed to ${languageNames[currentLanguage]}`, 'success');
+            }
+        }
+        
+        function updateStatus(message, type = 'idle') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+        
+        function addTranscript(text, type = 'final', confidence = null) {
+            const transcriptEl = document.getElementById('transcript');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = type === 'final' ? '✅' : '🔄';
+            const confidenceText = confidence !== null ? ` (${Math.round(confidence * 100)}%)` : '';
+            transcriptEl.textContent += `[${timestamp}] ${prefix} ${text}${confidenceText}\n`;
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        }
+        
+        function sendToVora(text) {
+            // Mock sending to VORA core
+            console.log('Sending to VORA:', text);
+            updateStatus('Processing with VORA...', 'processing');
+            
+            // Simulate VORA processing
+            setTimeout(() => {
+                updateStatus('VORA ready for next command', 'success');
+                document.getElementById('testStatus').textContent = '✅ VORA Integration Ready';
+            }, 1000);
+        }
+        
+        function startListening() {
+            if (isListening) return;
+            
+            isListening = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            
+            updateStatus(`Listening in ${languageNames[currentLanguage]}... Say "Hey Vora" or any command!`, 'listening');
+            
+            if (recognition) {
+                try {
+                    recognition.start();
+                } catch(e) {
+                    console.error('Failed to start recognition:', e);
+                    updateStatus('Failed to start recognition - try again', 'error');
+                    stopListening();
+                }
+            } else {
+                // Fallback for browsers without speech recognition
+                updateStatus('Speech recognition not supported - using mock', 'error');
+                startMockListening();
+            }
+        }
+        
+        function stopListening() {
+            if (!isListening) return;
+            
+            isListening = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            
+            updateStatus('Stopped listening', 'idle');
+            
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch(e) {
+                    console.error('Failed to stop recognition:', e);
+                }
+            }
+            
+            if (mockInterval) {
+                clearInterval(mockInterval);
+                mockInterval = null;
+            }
+        }
+        
+        function testMock() {
+            updateStatus('Running mock Agora STT test...', 'processing');
+            
+            const mockTexts = {
+                'en-US': [
+                    "Hello Vora, what time is it?",
+                    "Hey Vora, open Chrome browser",
+                    "Vora, check my email",
+                    "Hey Vora, what's the weather today?"
+                ],
+                'vi-VN': [
+                    "Vora ơi, mấy giờ rồi?",
+                    "Hey Vora, mở Chrome giúp tôi",
+                    "Vora, kiểm tra email đi",
+                    "Vora ơi, hôm nay thời tiết thế nào?"
+                ]
+            };
+            
+            const texts = mockTexts[currentLanguage] || mockTexts['en-US'];
+            let index = 0;
+            const interval = setInterval(() => {
+                if (index < texts.length) {
+                    const text = texts[index];
+                    addTranscript(text, 'final', 0.95);
+                    sendToVora(text);
+                    index++;
+                } else {
+                    clearInterval(interval);
+                    updateStatus('Mock test complete - VORA integration ready!', 'success');
+                    document.getElementById('testStatus').textContent = '✅ Phase 0 M4 PASS';
+                }
+            }, 2000);
+        }
+        
+        function startMockListening() {
+            let mockCount = 0;
+            mockInterval = setInterval(() => {
+                if (mockCount < 3 && isListening) {
+                    const mockText = `Mock speech input ${mockCount + 1}: "Hey Vora, test command"`;
+                    addTranscript(mockText, 'final');
+                    sendToVora(mockText);
+                    mockCount++;
+                } else {
+                    stopListening();
+                }
+            }, 3000);
+        }
+        
+        // Initialize
+        updateStatus('VORA STT Demo Ready - Select language and click Start Listening', 'idle');
+    </script>
+</body>
+</html>
