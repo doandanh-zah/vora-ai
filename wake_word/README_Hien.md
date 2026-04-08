@@ -1,36 +1,45 @@
-# Hướng dẫn Setup OpenWakeWord (Thay thế Picovoice Porcupine)
+# Hướng dẫn Setup & Test Wake Word "Hey VORA" (OpenWakeWord)
 **Dành riêng cho Nhiệm vụ của Hiển - Phase 0 & Phase 1**
 
-Theo Spec, thay vì sử dụng Porcupine (Picovoice) vốn không cần Python, chúng ta sẽ chuyển sang **OpenWakeWord**. OpenWakeWord có ưu thế là mã nguồn mở, không giới hạn tier, nhưng yêu cầu chạy qua Python Node.js sidecar IPC.
+Theo Spec, dự án sử dụng **OpenWakeWord** (mã nguồn mở, không giới hạn tier). Module này được chạy qua Python và giao tiếp với Node.js / Tauri thông qua IPC.
 
 ## 1. Cài đặt Môi trường
-Vì dự án dùng Tauri + Node.js nhưng OpenWakeWord lại gọi Python, máy test của Hiển cần có Python cài sẵn.
+Vì dự án dùng Node.js nhưng OpenWakeWord gọi Python, máy test của bạn cần có cài sẵn Python (khuyến nghị bản 3.9 trở lên).
 
-**Bước 1:** Cài thư viện Python.
+**Bước 1: Cài thư viện Python**
+Đảm bảo bạn đang ở thư mục `wake_word/`, sau đó chạy:
 ```bash
-cd wake_word
 pip install -r requirements.txt
 ```
 
-**Bước 2:** Đảm bảo Node.js đã sẵn sàng để test Wrapper.
+**Bước 2: Cài thư viện Node.js (nếu cần)**
+Vào thư mục chính của dự án, chạy `npm install` để đảm bảo Node.js đã sẵn sàng cho Wrapper.
 
-## 2. Training Wake Word "Hey VORA"
-Với Porcupine, bạn dùng Picovoice Console để lấy file `.ppn`. 
-Với OpenWakeWord, bạn có 2 lựa chọn:
-1. Dùng default: Truyền `--model alexa` vào lệnh để test pipeline trước.
-2. Dùng file ONNX tuỳ chỉnh: OpenWakeWord cho phép tạo model `.onnx` từ các công cụ text-to-speech. Khi có file `hey_vora.onnx`, copy vào thư mục này, và khởi tạo Node engine với `new WakeWordEngine('./hey_vora.onnx', 0.5)`.
+## 2. Hướng dẫn Test Wake Word
+Model tùy chỉnh `.onnx` (`hey_vora.onnx`) đã được đính kèm trong thư mục này. Quá trình test cần xác nhận bộ định tuyến âm thanh và engine Python hoạt động tốt với Wrapper của Node.js.
 
-## 3. Test theo Spec
-Nhiệm vụ của Hiển trong file DOC yêu cầu:
-> "End-to-end testing on Windows — 20+ runs per phase, latency measurement"
+### Cách 1: Test Python trực tiếp (Khuyên dùng khi debug mic)
+Bạn có thể test trực tiếp bằng Python để chắc chắn Micro đang thu nhận tốt.
+```bash
+python main.py --model hey_vora.onnx
+```
+- Khi chạy, Terminal sẽ in ra **`READY`**.
+- Bạn sẽ thấy dòng **`VOLUME:xx`** nhảy liên tục, biểu thị độ lớn âm thanh mà Micro thu được.
 
-**Kịch bản chạy test tự động:**
+### Cách 2: Test qua Node.js Wrapper (Test theo luồng Spec thực tế)
+Để script Node.js kích hoạt tiến trình con bằng Python và đọc IPC channel:
 ```bash
 node wrapper.js
 ```
-Điều này sẽ bật IPC channel giữa `wrapper.js` (Node) và `main.py` (Python runtime).
-Khi bạn nói "Alexa" (nếu dùng model mặc định), log sẽ in ra `Score` và `Latency` (thời gian trễ khi signal bắn từ Python qua Node.js stdout).
 
-**Lưu ý cho Hiển:**
-- Ghi lại Log MS Latency xem có vượt **<200ms** (từ lúc nói tới lúc Trigger) hay không. Do IPC có trễ chút nhưng OpenWakeWord rất tối ưu nên thường dưới 150ms.
-- Test trên đúng **2 máy Windows khác nhau** (theo spec) để xem Python + PyAudio có bị xung đột driver mic hay không và report (bugs) lại nhé!
+## 3. Quy trình thực hiện Test bằng Giọng Nói
+1. Khởi động script Node.js hoặc Python kể trên.
+2. Kiểm tra log có in ra chữ `READY` hay chưa.
+3. Thử nói chuyện bình thường để xem chỉ báo `VOLUME:xx` có hoạt động hay không.
+4. **Nói rõ cấu trúc: "Hey VORA"**.
+5. Quan sát console. Nếu thuật toán nhận dạng chính xác, console sẽ in ra dòng:
+   `TRIGGER:hey_vora.onnx:0.95:1648...` (với `0.95` là điểm khơp - Score).
+
+**Lưu ý cho Hiển khi Report:**
+- **Latency (Độ trễ thời gian):** Ghi chú lại thời gian từ lúc phát âm xong đến lúc Node.js nhận được tín hiệu qua màn hình console xem có nhỏ hơn **200ms** không.
+- **Môi trường Test:** Hãy test trên **trên 2 máy Windows khác nhau** với các loại microphone thiết bị khác nhau để đảm bảo PyAudio không bị xung đột driver mic. Viết log vào file test report!
