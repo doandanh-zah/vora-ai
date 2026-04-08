@@ -222,3 +222,7 @@ npm i -g vora-ai@latest && vora --version
 
 - Day la tai lieu cho nguoi dung cuoi, khong bao gom lenh publish/build noi bo.
 - Package install chuan: `vora-ai`.
+
+
+npm install -g vora-ai@0.1.26 #download
+vora configure #open setting
