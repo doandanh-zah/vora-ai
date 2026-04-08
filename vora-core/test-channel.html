@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Channel Name Test</title>
+</head>
+<body>
+    <h1>Channel Name Test</h1>
+    <button onclick="testChannel()">Test Channel Name</button>
+    <div id="output"></div>
+    
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+    <script>
+        function testChannel() {
+            // Test join with hardcoded channel name
+            const channelName = "vora-test-channel-123";
+            
+            document.getElementById('output').innerHTML = `
+                <p><strong>Generated Channel Name:</strong> ${channelName}</p>
+                <p><strong>Length:</strong> ${channelName.length}</p>
+                <p><strong>Attempting to join...</strong></p>
+            `;
+            
+            // Test join
+            const client = AgoraRTC.createClient({ codec: "vp8", mode: "rtc" });
+            
+            client.join("test_app_id", null, channelName)
+                .then(uid => {
+                    document.getElementById('output').innerHTML += `<p style="color: green;">✅ SUCCESS: Joined with UID ${uid}</p>`;
+                })
+                .catch(error => {
+                    document.getElementById('output').innerHTML += `<p style="color: red;">❌ ERROR: ${error.message}</p>`;
+                    console.error('Join error:', error);
+                });
+        }
+    </script>
+</body>
+</html>

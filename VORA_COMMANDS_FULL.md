@@ -1,0 +1,228 @@
+# VORA Commands For End Users
+
+## 1) Cai dat nhanh (khuyen nghi)
+
+### Option 1: One-liner (khong can git)
+
+#### macOS / Linux / WSL
+```bash
+curl -fL https://heyvora.fun/install.sh | bash
+```
+
+#### Windows PowerShell
+```powershell
+powershell -c "irm https://heyvora.fun/install.ps1 | iex"
+```
+
+### Option 2: NPM install
+
+#### macOS / Linux / WSL
+
+```bash
+npm i -g vora-ai
+vora --version
+```
+
+### Windows PowerShell
+
+```powershell
+npm i -g vora-ai
+vora --version
+```
+
+## 2) Kiem tra cai dat
+
+### Tat ca he
+
+```bash
+vora --version
+vora --help
+```
+
+### Kiem tra binary path
+
+macOS / Linux / WSL:
+
+```bash
+which vora
+```
+
+Windows CMD:
+
+```bat
+where vora
+```
+
+Windows PowerShell:
+
+```powershell
+Get-Command vora
+```
+
+## 3) Cac lenh user da test (2026-04-02)
+
+### Doctor
+
+```bash
+vora doctor
+vora doctor --non-interactive --yes
+```
+
+### Configure (interactive wizard)
+
+```bash
+vora configure
+```
+
+Chay nhanh dung section:
+
+```bash
+vora configure --section gateway
+```
+
+### Models
+
+```bash
+vora models list
+vora models status --json
+```
+
+### Gateway (install / start / restart)
+
+Dat mode local truoc:
+
+```bash
+vora config set gateway.mode local
+```
+
+Cai service + start + status + restart:
+
+```bash
+vora gateway install --force
+vora gateway start
+vora gateway status
+vora gateway restart
+vora gateway status
+```
+
+Neu bi dung cong `18789` (xung dot voi process khac), chay cong rieng:
+
+```bash
+vora gateway --port 19001 install --force
+vora gateway --port 19001 start
+vora gateway --port 19001 status
+vora gateway --port 19001 restart
+```
+
+## 4) Cap nhat len ban moi nhat
+
+```bash
+npm i -g vora-ai@latest
+vora --version
+```
+
+## 5) Cai 1 version cu the
+
+```bash
+npm i -g vora-ai@0.1.2
+vora --version
+```
+
+## 6) Go cai dat
+
+```bash
+npm uninstall -g vora-ai
+```
+
+Kiem tra da go:
+
+```bash
+vora --version
+```
+
+Neu go thanh cong, lenh tren se bao `command not found` (hoac tuong duong).
+
+## 7) Cai lai sach (khi bi loi)
+
+```bash
+npm uninstall -g vora-ai
+npm cache clean --force
+npm i -g vora-ai
+vora --version
+```
+
+## 8) Cai tu file `.tgz` (fallback)
+
+### macOS / Linux / WSL
+
+```bash
+npm i -g --force /path/to/vora-ai-0.1.2.tgz
+vora --version
+```
+
+### Windows PowerShell
+
+```powershell
+npm i -g --force "C:\path\to\vora-ai-0.1.2.tgz"
+vora --version
+```
+
+## 9) Troubleshooting nhanh
+
+### Loi `vora: command not found`
+
+```bash
+npm ls -g --depth=0 vora-ai
+```
+
+Neu thay da cai ma van khong chay, mo terminal moi roi thu lai:
+
+```bash
+vora --version
+```
+
+### Kiem tra Node version
+
+```bash
+node --version
+```
+
+VORA yeu cau Node `>=22.14.0`.
+
+Neu dung `nvm`:
+
+```bash
+nvm install 22
+nvm use 22
+nvm alias default 22
+```
+
+### Loi gateway `device signature invalid` hoac status fail
+
+```bash
+vora gateway status --deep
+vora doctor
+```
+
+Neu van fail do conflict cong:
+
+```bash
+vora gateway --port 19001 install --force
+vora gateway --port 19001 restart
+vora gateway --port 19001 status
+```
+
+## 10) Lenh nhanh 1 dong (macOS / Linux)
+
+```bash
+npm i -g vora-ai@latest && vora --version
+```
+
+## 11) Ghi chu
+
+- Day la tai lieu cho nguoi dung cuoi, khong bao gom lenh publish/build noi bo.
+- Package install chuan: `vora-ai`.
+
+
+npm install -g vora-ai@0.1.26 #download
+vora configure #open setting

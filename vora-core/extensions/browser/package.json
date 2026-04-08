@@ -1,0 +1,12 @@
+{
+  "name": "@vora/browser-plugin",
+  "version": "2026.4.1",
+  "private": true,
+  "description": "Vora browser tool plugin",
+  "type": "module",
+  "vora": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

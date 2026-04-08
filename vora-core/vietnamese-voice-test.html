@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VORA - Vietnamese Voice Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .voice-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .voice-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .voice-card.selected {
+            background: rgba(40, 167, 69, 0.3);
+            border-color: rgba(40, 167, 69, 0.5);
+        }
+        
+        .voice-name {
+            font-weight: bold;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+        
+        .voice-lang {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+        
+        .voice-service {
+            font-size: 12px;
+            opacity: 0.6;
+        }
+        
+        .test-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .test-input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            margin: 10px 0;
+        }
+        
+        .test-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin: 15px 0;
+        }
+        
+        button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        .status {
+            text-align: center;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+        
+        .status.ready {
+            background: rgba(40, 167, 69, 0.3);
+        }
+        
+        .status.speaking {
+            background: rgba(23, 162, 184, 0.3);
+        }
+        
+        .status.error {
+            background: rgba(220, 53, 69, 0.3);
+        }
+        
+        .logo {
+            text-align: center;
+            font-size: 4em;
+            margin: 20px 0;
+        }
+        
+        .quality-rating {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        
+        .star {
+            color: #ffd700;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🌊</div>
+        <h1>VORA - Vietnamese Voice Test</h1>
+        <p style="text-align: center; opacity: 0.8;">Testing Vietnamese TTS Voices Quality</p>
+        
+        <div id="status" class="status ready">
+            Loading voices...
+        </div>
+        
+        <div class="test-section">
+            <h3>🎤 Test Vietnamese Text:</h3>
+            <input 
+                type="text" 
+                id="testText" 
+                class="test-input" 
+                value="Xin chào, tôi là VORA, trợ lý ảo thông minh của bạn. Hôm nay trời đẹp quá!"
+                placeholder="Nhập text tiếng Việt để test..."
+            >
+            
+            <div class="test-buttons">
+                <button onclick="testSelectedVoice()">🔊 Test Selected Voice</button>
+                <button onclick="testAllVoices()">🎭 Test All Voices</button>
+                <button onclick="stopAllSpeech()">⏹️ Stop All</button>
+                <button onclick="loadVoices()">🔄 Reload Voices</button>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>🎭 Available Vietnamese Voices:</h3>
+            <div id="voiceList" class="voice-grid">
+                Loading voices...
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h3>📊 Voice Quality Assessment:</h3>
+            <div id="qualityReport">
+                <p><strong>Testing Criteria:</strong></p>
+                <ul>
+                    <li>🎯 Pronunciation clarity</li>
+                    <li>🗣️ Natural speech flow</li>
+                    <li>🎵 Tone and intonation</li>
+                    <li>📝 Word accuracy</li>
+                    <li>⚡ Response speed</li>
+                </ul>
+                <p><strong>Best Vietnamese voices will be marked with ⭐⭐⭐</strong></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allVoices = [];
+        let vietnameseVoices = [];
+        let selectedVoice = null;
+        let currentSpeech = null;
+        
+        // Test sentences for Vietnamese
+        const testSentences = [
+            "Xin chào, tôi là VORA",
+            "Hôm nay bạn khỏe không?",
+            "Tôi có thể giúp gì cho bạn?",
+            "Thời tiết hôm nay rất đẹp",
+            "Mở Chrome browser giúp tôi",
+            "Kiểm tra email đi nhé",
+            "Bây giờ là ba giờ chiều",
+            "Cảm ơn bạn rất nhiều"
+        ];
+        
+        function updateStatus(message, type = 'ready') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+        
+        function loadVoices() {
+            updateStatus('Loading voices...');
+            
+            // Force load voices
+            allVoices = speechSynthesis.getVoices();
+            
+            // Filter Vietnamese voices
+            vietnameseVoices = allVoices.filter(voice => 
+                voice.lang.includes('vi') || 
+                voice.lang.includes('Vietnamese') ||
+                voice.name.toLowerCase().includes('viet') ||
+                voice.name.toLowerCase().includes('nam')
+            );
+            
+            // Also include some high-quality English voices for comparison
+            const englishVoices = allVoices.filter(voice => 
+                voice.lang.includes('en-US') &&
+                (voice.name.includes('Samantha') || 
+                 voice.name.includes('Alex') || 
+                 voice.name.includes('Karen') ||
+                 voice.name.includes('Daniel'))
+            );
+            
+            displayVoices();
+            
+            if (vietnameseVoices.length === 0) {
+                updateStatus('⚠️ No Vietnamese voices found - showing English alternatives', 'error');
+            } else {
+                updateStatus(`✅ Found ${vietnameseVoices.length} Vietnamese voices`, 'ready');
+            }
+        }
+        
+        function displayVoices() {
+            const voiceList = document.getElementById('voiceList');
+            voiceList.innerHTML = '';
+            
+            if (vietnameseVoices.length === 0) {
+                voiceList.innerHTML = '<p>No Vietnamese voices available on this system.</p>';
+                return;
+            }
+            
+            vietnameseVoices.forEach((voice, index) => {
+                const card = document.createElement('div');
+                card.className = 'voice-card';
+                card.onclick = () => selectVoice(voice, card);
+                
+                // Quality assessment based on voice name and service
+                const quality = assessVoiceQuality(voice);
+                
+                card.innerHTML = `
+                    <div class="voice-name">${voice.name}</div>
+                    <div class="voice-lang">${voice.lang} (${voice.localService || 'Unknown service'})</div>
+                    <div class="voice-service">Service: ${voice.localService || 'System default'}</div>
+                    <div class="quality-rating">
+                        ${generateStars(quality)}
+                    </div>
+                `;
+                
+                voiceList.appendChild(card);
+            });
+        }
+        
+        function assessVoiceQuality(voice) {
+            // Quality assessment based on common Vietnamese voice patterns
+            const name = voice.name.toLowerCase();
+            const service = voice.localService || '';
+            
+            // High-quality indicators
+            if (name.includes('premium') || name.includes('enhanced') || service.includes('neural')) {
+                return 5;
+            }
+            if (name.includes('female') || name.includes('male')) {
+                return 4;
+            }
+            if (name.includes('viet')) {
+                return 3;
+            }
+            
+            return 2; // Default rating
+        }
+        
+        function generateStars(rating) {
+            let stars = '';
+            for (let i = 1; i <= 5; i++) {
+                stars += i <= rating ? '⭐' : '☆';
+            }
+            return stars;
+        }
+        
+        function selectVoice(voice, cardElement) {
+            // Remove previous selection
+            document.querySelectorAll('.voice-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            
+            // Add selection to clicked card
+            cardElement.classList.add('selected');
+            selectedVoice = voice;
+            
+            updateStatus(`Selected: ${voice.name}`, 'ready');
+        }
+        
+        function testSelectedVoice() {
+            if (!selectedVoice) {
+                updateStatus('Please select a voice first', 'error');
+                return;
+            }
+            
+            const text = document.getElementById('testText').value;
+            speakWithVoice(text, selectedVoice);
+        }
+        
+        function testAllVoices() {
+            if (vietnameseVoices.length === 0) {
+                updateStatus('No Vietnamese voices to test', 'error');
+                return;
+            }
+            
+            let voiceIndex = 0;
+            
+            function speakNext() {
+                if (voiceIndex >= vietnameseVoices.length) {
+                    updateStatus('✅ All voices tested!', 'ready');
+                    return;
+                }
+                
+                const voice = vietnameseVoices[voiceIndex];
+                const text = testSentences[voiceIndex % testSentences.length];
+                
+                updateStatus(`Testing voice ${voiceIndex + 1}/${vietnameseVoices.length}: ${voice.name}`, 'speaking');
+                
+                speakWithVoice(text, voice, () => {
+                    voiceIndex++;
+                    setTimeout(speakNext, 1000); // Pause between voices
+                });
+            }
+            
+            speakNext();
+        }
+        
+        function speakWithVoice(text, voice, callback) {
+            // Cancel any ongoing speech
+            speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.voice = voice;
+            utterance.lang = voice.lang;
+            utterance.rate = 0.9; // Slightly slower for Vietnamese
+            utterance.pitch = 1.0;
+            utterance.volume = 0.8;
+            
+            utterance.onstart = () => {
+                console.log(`Speaking with: ${voice.name}`);
+            };
+            
+            utterance.onend = () => {
+                console.log(`Finished speaking with: ${voice.name}`);
+                if (callback) callback();
+            };
+            
+            utterance.onerror = (event) => {
+                console.error(`Error with voice ${voice.name}:`, event);
+                updateStatus(`Error with ${voice.name}`, 'error');
+                if (callback) callback();
+            };
+            
+            speechSynthesis.speak(utterance);
+        }
+        
+        function stopAllSpeech() {
+            speechSynthesis.cancel();
+            updateStatus('Speech stopped', 'ready');
+        }
+        
+        // Initialize
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = loadVoices;
+        }
+        
+        // Initial load
+        loadVoices();
+        
+        // Auto-refresh voices after a delay
+        setTimeout(loadVoices, 1000);
+    </script>
+</body>
+</html>
