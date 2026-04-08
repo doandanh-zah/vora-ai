@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agora + Groq Quick Voice Test</title>
+    <script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --line: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --ok: #2ea043;
+        --err: #f85149;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+      .hint {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+      .grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr 1fr;
+      }
+      .grid3 {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      @media (max-width: 860px) {
+        .grid,
+        .grid3 {
+          grid-template-columns: 1fr;
+        }
+      }
+      label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      input,
+      textarea,
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0b0f14;
+        color: var(--text);
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      textarea {
+        min-height: 74px;
+        resize: vertical;
+      }
+      button {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #1f6feb;
+        color: #fff;
+        padding: 8px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.secondary {
+        background: #30363d;
+      }
+      .btns {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      .status {
+        margin-top: 10px;
+        font-size: 13px;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: var(--err);
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+      }
+      .log {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0b0f14;
+        min-height: 140px;
+        max-height: 280px;
+        overflow: auto;
+        padding: 10px;
+        white-space: pre-wrap;
+        font-size: 12px;
+      }
+      details {
+        margin-top: 12px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Agora STT/TTS + Groq Quick Test</h1>
+      <p class="hint">
+        Minimal UI: fill required fields, then click Start. This page does full voice loop:
+        Mic -> Agora STT -> Groq -> Agora TTS audio.
+      </p>
+
+      <section class="panel">
+        <div class="grid3">
+          <div>
+            <label for="appId">Agora App ID</label>
+            <input id="appId" placeholder="your_agora_app_id" />
+          </div>
+          <div>
+            <label for="channel">Channel</label>
+            <input id="channel" value="vora-quick-test" />
+          </div>
+          <div>
+            <label for="uid">Browser UID</label>
+            <input id="uid" value="1002" />
+          </div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="restToken">Agora REST Auth Token (for Authorization: agora token=...)</label>
+            <input id="restToken" type="password" placeholder="your_conversational_ai_token" />
+          </div>
+          <div>
+            <label for="rtcToken">Browser RTC Token (for Browser UID)</label>
+            <input id="rtcToken" type="password" placeholder="rtc_token_for_browser_uid" />
+          </div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="agentRtcToken">Agent RTC Token (optional, fallback = Browser RTC Token)</label>
+            <input id="agentRtcToken" type="password" placeholder="rtc_token_for_agent_uid" />
+          </div>
+          <div></div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="groqKey">Groq API Key</label>
+            <input id="groqKey" type="password" placeholder="gsk_..." />
+          </div>
+          <div>
+            <label for="groqModel">Groq Model</label>
+            <input id="groqModel" value="llama-3.1-8b-instant" />
+          </div>
+        </div>
+
+        <details>
+          <summary>Advanced (optional)</summary>
+          <div class="grid" style="margin-top: 10px">
+            <div>
+              <label for="apiBase">REST API Base</label>
+              <input id="apiBase" value="https://api.agora.io/api/conversational-ai-agent/v2" />
+            </div>
+            <div>
+              <label for="language">ASR Language</label>
+              <input id="language" value="vi-VN" />
+            </div>
+          </div>
+          <div class="grid">
+            <div>
+              <label for="agentUid">Agent RTC UID</label>
+              <input id="agentUid" value="1001" />
+            </div>
+            <div></div>
+          </div>
+          <div>
+            <label for="ttsParams">TTS params JSON</label>
+            <textarea id="ttsParams">{
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "YOUR_OPENAI_TTS_KEY",
+  "model": "gpt-4o-mini-tts",
+  "voice": "coral",
+  "speed": 1.0
+}</textarea>
+          </div>
+        </details>
+
+        <div class="btns">
+          <button id="btnStart">Start Voice Loop</button>
+          <button id="btnStop" class="secondary">Stop</button>
+          <button id="btnSpeak" class="secondary">Send TTS Test</button>
+        </div>
+        <div class="status">
+          Status: <span id="statusText" class="mono">idle</span>
+          <span id="statusExtra" class="mono"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="grid">
+          <div>
+            <label>Conversation History</label>
+            <div id="history" class="log mono"></div>
+          </div>
+          <div>
+            <label>Event Log</label>
+            <div id="events" class="log mono"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      let client = null;
+      let micTrack = null;
+      let joined = false;
+      let agentId = "";
+      let pollTimer = null;
+      let lastHistory = "";
+
+      const $ = (id) => document.getElementById(id);
+
+      function logEvent(msg, type = "info") {
+        const ts = new Date().toLocaleTimeString();
+        const prefix = type === "ok" ? "[OK]" : type === "error" ? "[ERR]" : "[INFO]";
+        $("events").textContent += `${ts} ${prefix} ${msg}\n`;
+        $("events").scrollTop = $("events").scrollHeight;
+      }
+
+      function setStatus(text, extra = "", isError = false) {
+        $("statusText").textContent = text;
+        $("statusText").className = `mono ${isError ? "err" : "ok"}`;
+        $("statusExtra").textContent = extra ? ` ${extra}` : "";
+      }
+
+      function getAuthHeader() {
+        const token = $("restToken").value.trim();
+        if (!token) {
+          throw new Error("Missing Agora REST auth token.");
+        }
+        return `agora token=${token}`;
+      }
+
+      function getApiBase() {
+        const base = $("apiBase").value.trim().replace(/\/+$/, "");
+        if (!base) {
+          throw new Error("Missing REST API base.");
+        }
+        return base;
+      }
+
+      function getRequired() {
+        const appId = $("appId").value.trim();
+        const channel = $("channel").value.trim();
+        const uid = $("uid").value.trim();
+        const rtcToken = $("rtcToken").value.trim();
+        const agentRtcToken = $("agentRtcToken").value.trim();
+        const groqKey = $("groqKey").value.trim();
+        const groqModel = $("groqModel").value.trim();
+        const agentUid = $("agentUid").value.trim() || "1001";
+
+        if (!appId || !channel || !uid || !rtcToken || !groqKey || !groqModel) {
+          throw new Error("Missing required fields.");
+        }
+
+        return { appId, channel, uid, rtcToken, agentRtcToken, groqKey, groqModel, agentUid };
+      }
+
+      async function agoraRequest(path, method = "GET", body) {
+        const { appId } = getRequired();
+        const url = `${getApiBase()}/projects/${appId}${path}`;
+
+        const res = await fetch(url, {
+          method,
+          headers: {
+            Authorization: getAuthHeader(),
+            "Content-Type": "application/json",
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${JSON.stringify(data)}`);
+        }
+        return data;
+      }
+
+      async function joinRtc() {
+        if (joined) {
+          return;
+        }
+        const { appId, channel, uid, rtcToken } = getRequired();
+
+        client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        client.on("user-published", async (user, mediaType) => {
+          try {
+            await client.subscribe(user, mediaType);
+            if (mediaType === "audio" && user.audioTrack) {
+              user.audioTrack.play();
+              logEvent(`Playing remote TTS audio from UID=${user.uid}`, "ok");
+            }
+          } catch (err) {
+            logEvent(`Subscribe failed: ${err.message}`, "error");
+          }
+        });
+
+        const joinedUid = await client.join(appId, channel, rtcToken, Number(uid));
+        micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        await client.publish([micTrack]);
+        joined = true;
+        logEvent(`RTC joined (uid=${joinedUid}), mic published`, "ok");
+      }
+
+      async function leaveRtc() {
+        if (micTrack) {
+          micTrack.stop();
+          micTrack.close();
+          micTrack = null;
+        }
+        if (client && joined) {
+          await client.leave();
+        }
+        joined = false;
+      }
+
+      function buildJoinPayload() {
+        const { channel, uid, rtcToken, agentRtcToken, groqKey, groqModel, agentUid } = getRequired();
+        const ttsParams = JSON.parse($("ttsParams").value || "{}");
+        const name = `vora-quick-${Date.now()}`;
+
+        return {
+          name,
+          properties: {
+            channel,
+            token: agentRtcToken || rtcToken,
+            agent_rtc_uid: agentUid,
+            remote_rtc_uids: [uid],
+            enable_string_uid: false,
+            idle_timeout: 0,
+            asr: {
+              vendor: "ares",
+              language: $("language").value.trim() || "vi-VN",
+              params: {},
+            },
+            llm: {
+              vendor: "custom",
+              style: "openai",
+              url: "https://api.groq.com/openai/v1/chat/completions",
+              api_key: groqKey,
+              system_messages: [
+                {
+                  role: "system",
+                  content: "You are VORA. Reply concise and practical.",
+                },
+              ],
+              greeting_message: "Hello. I am ready.",
+              failure_message: "Sorry, please say that again.",
+              output_modalities: ["text"],
+              params: {
+                model: groqModel,
+                temperature: 0.2,
+                max_tokens: 180,
+              },
+            },
+            tts: {
+              vendor: "openai",
+              params: ttsParams,
+            },
+          },
+        };
+      }
+
+      function renderHistory(items) {
+        const out = [];
+        for (const row of items || []) {
+          out.push(`${(row.role || "unknown").toUpperCase()}: ${row.content || ""}`);
+        }
+        $("history").textContent = out.join("\n\n") || "No data yet.";
+        $("history").scrollTop = $("history").scrollHeight;
+      }
+
+      async function fetchHistory() {
+        if (!agentId) {
+          return;
+        }
+        const data = await agoraRequest(`/agents/${agentId}/history`, "GET");
+        const fp = JSON.stringify(data?.contents || []);
+        if (fp !== lastHistory) {
+          lastHistory = fp;
+          renderHistory(data?.contents || []);
+          logEvent(`History updated (${(data?.contents || []).length} items)`, "ok");
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) {
+          return;
+        }
+        pollTimer = setInterval(() => {
+          void fetchHistory();
+        }, 1500);
+      }
+
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      async function startAll() {
+        try {
+          setStatus("starting...");
+          await joinRtc();
+          const payload = buildJoinPayload();
+          const data = await agoraRequest("/join", "POST", payload);
+          agentId = data.agent_id || "";
+          if (!agentId) {
+            throw new Error(`No agent_id in response: ${JSON.stringify(data)}`);
+          }
+          setStatus("running", `(agent_id=${agentId})`);
+          logEvent(`Agent started: ${agentId}`, "ok");
+          startPolling();
+        } catch (err) {
+          setStatus("error", err.message, true);
+          logEvent(err.message, "error");
+        }
+      }
+
+      async function stopAll() {
+        try {
+          stopPolling();
+          if (agentId) {
+            await agoraRequest(`/agents/${agentId}/leave`, "POST");
+            logEvent(`Agent stopped: ${agentId}`, "ok");
+            agentId = "";
+          }
+          await leaveRtc();
+          setStatus("stopped");
+        } catch (err) {
+          setStatus("error", err.message, true);
+          logEvent(err.message, "error");
+        }
+      }
+
+      async function speakTest() {
+        try {
+          if (!agentId) {
+            throw new Error("Start first.");
+          }
+          await agoraRequest(`/agents/${agentId}/speak`, "POST", {
+            text: "Xin chao, day la test TTS tu Agora.",
+            priority: "INTERRUPT",
+            interruptable: true,
+          });
+          logEvent("TTS test sent.", "ok");
+        } catch (err) {
+          logEvent(err.message, "error");
+        }
+      }
+
+      $("btnStart").addEventListener("click", () => {
+        void startAll();
+      });
+      $("btnStop").addEventListener("click", () => {
+        void stopAll();
+      });
+      $("btnSpeak").addEventListener("click", () => {
+        void speakTest();
+      });
+      window.addEventListener("beforeunload", () => {
+        stopPolling();
+        void stopAll();
+      });
+
+      setStatus("idle");
+      $("history").textContent = "No data yet.";
+      logEvent("Ready.");
+    </script>
+  </body>
+</html>
