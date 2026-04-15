@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 
-export const Step2GatewayConfig = ({ onNext, onPrev, onSetPort, onInstallService, onStartService }: { 
+export const GatewayConfig = ({ onNext, onPrev, onSetPort, onInstallService, onStartService }: { 
   onNext: () => void; 
   onPrev: () => void;
   onSetPort: (port: number) => Promise<void>;

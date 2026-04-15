@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Server, Globe } from 'lucide-react';
 
-export const Step1GatewaySelect = ({ onNext, onPrev }: { onNext: (mode: string) => void; onPrev: () => void }) => {
+export const GatewaySelect = ({ onNext, onPrev }: { onNext: (mode: string) => void; onPrev: () => void }) => {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (

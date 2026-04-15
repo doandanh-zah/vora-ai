@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Send, Hash, ArrowRight } from 'lucide-react';
 
-export const Step5Channels = ({ onNext, onPrev }: { onNext: (data: any) => void; onPrev: () => void }) => {
+export const Channels = ({ onNext, onPrev }: { onNext: (data: any) => void; onPrev: () => void }) => {
   const [telegramToken, setTelegramToken] = useState('');
   const [discordToken, setDiscordToken] = useState('');
 

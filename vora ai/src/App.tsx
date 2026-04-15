@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
 import { VoraLogo } from './components/VoraLogo';
-import { Step1GatewaySelect } from './onboarding/steps/Step1GatewaySelect';
-import { Step2GatewayConfig } from './onboarding/steps/Step2GatewayConfig';
-import { Step3ProviderSelect } from './onboarding/steps/Step3ProviderSelect';
-import { Step4ProviderSetup } from './onboarding/steps/Step4ProviderSetup';
-import { Step5Channels } from './onboarding/steps/Step5Channels';
-import { Step6HatchTest } from './onboarding/steps/Step6HatchTest';
+import { GatewaySelect } from './onboarding/steps/GatewaySelect';
+import { GatewayConfig } from './onboarding/steps/GatewayConfig';
+import { ProviderSelect } from './onboarding/steps/ProviderSelect';
+import { ProviderSetup } from './onboarding/steps/ProviderSetup';
+import { Channels } from './onboarding/steps/Channels';
+import { HatchTest } from './onboarding/steps/HatchTest';
+import { ChatPage } from './pages/ChatPage';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ArrowRight } from 'lucide-react';
 
+type AppView = 'onboarding' | 'chat';
+
 export default function App() {
+  const [view, setView] = useState<AppView>('onboarding');
   const [currentStep, setCurrentStep] = useState(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
@@ -21,154 +25,128 @@ export default function App() {
   });
 
   useEffect(() => {
-    const unlisten = listen('setup-event', (event: any) => {
-      const payload = event.payload;
-      console.log('Setup Event:', payload);
-      setInstallStatus(payload.message);
-    });
-
-    return () => {
-      unlisten.then(f => f());
+    const init = async () => {
+      try {
+        const status = await invoke<any>('get_setup_status');
+        if (status.is_completed) {
+          setView('chat'); // Go straight to chat
+          setSetupState({ gatewayMode: 'local', provider: status.provider });
+        }
+      } catch (e) {
+        console.error('Failed to load setup status', e);
+      }
     };
+    init();
+
+    const unlisten = listen('setup-event', (event: any) => {
+      setInstallStatus(event.payload.message);
+    });
+    return () => { unlisten.then(f => f()); };
   }, []);
 
   const nextStep = () => setCurrentStep(prev => prev + 1);
   const prevStep = () => setCurrentStep(prev => Math.max(0, prev - 1));
 
   const startSession = async () => {
+    setIsInstalling(true);
+    setInstallStatus('Initializing...');
     try {
-      setIsInstalling(true);
-      setInstallStatus('Initializing Vora Setup...');
       const sid = await invoke<string>('start_setup_session');
       setSessionId(sid);
-      setTimeout(() => {
-        setIsInstalling(false);
-        nextStep();
-      }, 1000);
+      setTimeout(() => { setIsInstalling(false); nextStep(); }, 800);
     } catch (e) {
       console.error(e);
-      setInstallStatus('Failed to start session.');
+      setInstallStatus('Failed.');
     }
-  };
-
-  const handleGatewayMode = async (mode: string) => {
-    await invoke('select_gateway_mode', { mode });
-    setSetupState({ ...setupState, gatewayMode: mode });
-    nextStep();
-  };
-
-  const handleSetPort = async (port: number) => {
-    await invoke('set_gateway_port', { port });
-  };
-
-  const handleInstallService = async () => {
-    await invoke('install_gateway_service', { sessionId });
-  };
-
-  const handleStartService = async () => {
-    // In a real app, this would trigger a background task
-    await new Promise(resolve => setTimeout(resolve, 1500));
-  };
-
-  const handleProviderSelect = async (provider: string) => {
-    await invoke('select_model_provider', { provider });
-    setSetupState({ ...setupState, provider });
-    nextStep();
-  };
-
-  const handleSaveKey = async (key: string) => {
-    await invoke('save_groq_api_key', { key });
-  };
-
-  const handleCheckOllama = async () => {
-    return await invoke<boolean>('verify_ollama_installed', { sessionId });
-  };
-
-  const handleHatchTest = async (prompt: string) => {
-    return await invoke<string>('hatch_test_prompt', { prompt });
   };
 
   const handleFinish = async () => {
     await invoke('commit_setup_config');
-    alert('Setup Complete! Vora is ready.');
+    setView('chat');
   };
 
+  // --- If setup is done, show Chat ---
+  if (view === 'chat') {
+    return <ChatPage />;
+  }
+
+  // --- Onboarding ---
   return (
     <div className="onboarding-container">
       {currentStep === 0 && (
         <div className="flex flex-col items-center animate-in fade-in zoom-in duration-700">
-          <VoraLogo size={180} />
-          <div className="mt-20 flex flex-col items-center gap-6">
+          <VoraLogo size={140} />
+          <div className="mt-16 flex flex-col items-center gap-5">
             {!isInstalling ? (
-              <button 
+              <button
                 onClick={startSession}
-                className="btn-primary text-xl px-4 py-2 flex items-center justify-center gap-2"
+                className="btn-primary text-lg px-8 py-3 flex items-center justify-center gap-2"
               >
-                Start Setup
-                <ArrowRight size={20}/>
+                Start Setup <ArrowRight size={18}/>
               </button>
             ) : (
               <div className="flex flex-col items-center gap-4">
-                <div className="w-64 h-2 bg-white/10 rounded-full overflow-hidden">
-                  <div className="h-full bg-white animate-pulse" style={{ width: '40%' }}></div>
+                <div className="w-56 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] animate-pulse rounded-full" style={{ width: '45%' }} />
                 </div>
-                <p className="text-white/70 italic text-sm tracking-widest uppercase">
-                  {installStatus}
-                </p>
+                <p className="text-white/50 italic text-xs tracking-widest uppercase">{installStatus}</p>
               </div>
             )}
-            <p className="text-white/40 text-xs mt-4 uppercase tracking-[0.3em]">
-              VERSION 1.0.0
-            </p>
+            <p className="text-white/20 text-[10px] mt-3 uppercase tracking-[0.3em]">v1.0.0 · Phase 0.5</p>
           </div>
         </div>
       )}
 
       {currentStep === 1 && (
-        <Step1GatewaySelect 
-          onNext={handleGatewayMode} 
-          onPrev={prevStep} 
+        <GatewaySelect
+          onNext={async (mode: string) => {
+            await invoke('select_gateway_mode', { mode });
+            setSetupState({ ...setupState, gatewayMode: mode });
+            nextStep();
+          }}
+          onPrev={prevStep}
         />
       )}
 
       {currentStep === 2 && (
-        <Step2GatewayConfig 
-          onNext={nextStep} 
+        <GatewayConfig
+          onNext={nextStep}
           onPrev={prevStep}
-          onSetPort={handleSetPort}
-          onInstallService={handleInstallService}
-          onStartService={handleStartService}
+          onSetPort={async (port: number) => await invoke('set_gateway_port', { port })}
+          onInstallService={async () => await invoke('install_gateway_service', { sessionId })}
+          onStartService={async () => await new Promise(r => setTimeout(r, 1200))}
         />
       )}
 
       {currentStep === 3 && (
-        <Step3ProviderSelect 
-          onNext={handleProviderSelect} 
-          onPrev={prevStep} 
+        <ProviderSelect
+          onNext={async (provider: string) => {
+            await invoke('select_model_provider', { provider });
+            setSetupState({ ...setupState, provider });
+            nextStep();
+          }}
+          onPrev={prevStep}
         />
       )}
 
       {currentStep === 4 && (
-        <Step4ProviderSetup 
+        <ProviderSetup
           provider={setupState.provider}
           onNext={nextStep}
           onPrev={prevStep}
-          onSaveKey={handleSaveKey}
-          onCheckOllama={handleCheckOllama}
+          onSaveKey={async (key: string) => await invoke('save_groq_api_key', { key })}
+          onCheckOllama={async () => await invoke<boolean>('verify_ollama_installed', { sessionId })}
         />
       )}
 
       {currentStep === 5 && (
-        <Step5Channels 
-          onNext={nextStep}
-          onPrev={prevStep}
-        />
+        <Channels onNext={nextStep} onPrev={prevStep} />
       )}
 
       {currentStep === 6 && (
-        <Step6HatchTest 
+        <HatchTest
           onFinish={handleFinish}
-          onHatchTest={handleHatchTest}
+          onHatchTest={async (prompt: string) => await invoke<string>('hatch_test_prompt', { prompt })}
         />
       )}
     </div>

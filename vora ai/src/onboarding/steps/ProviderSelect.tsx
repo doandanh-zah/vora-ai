@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ArrowRight, Box, Cpu } from 'lucide-react';
 
-export const Step3ProviderSelect = ({ onNext, onPrev }: { onNext: (provider: string) => void; onPrev: () => void }) => {
+export const ProviderSelect = ({ onNext, onPrev }: { onNext: (provider: string) => void; onPrev: () => void }) => {
   const [selected, setSelected] = useState<string | null>(null);
 
   return (
