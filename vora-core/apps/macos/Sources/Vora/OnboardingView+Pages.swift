@@ -589,6 +589,10 @@ extension OnboardingView {
 
     func permissionsPage() -> some View {
         self.onboardingPage {
+            let requiredCaps = self.requiredPermissionCaps
+            let optionalCaps = Capability.allCases.filter { !requiredCaps.contains($0) }
+            let missingRequiredCount = self.missingRequiredPermissionCaps.count
+
             Text("Grant permissions")
                 .font(.largeTitle.weight(.semibold))
             Text("These macOS permissions let Vora automate apps and capture context on this Mac.")
@@ -599,7 +603,53 @@ extension OnboardingView {
                 .fixedSize(horizontal: false, vertical: true)
 
             self.onboardingCard(spacing: 8, padding: 12) {
-                ForEach(Capability.allCases, id: \.self) { cap in
+                Text("Required for setup")
+                    .font(.headline)
+
+                Text("Vora will request these now so screenshot and UI automation tasks don't interrupt users later.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(requiredCaps, id: \.self) { cap in
+                    PermissionRow(
+                        capability: cap,
+                        status: self.permissionMonitor.status[cap] ?? false,
+                        compact: true)
+                    {
+                        Task { await self.request(cap) }
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await self.requestRequiredPermissionsIfNeeded() }
+                    } label: {
+                        Label("Grant required now", systemImage: "bolt.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(self.isRequesting || missingRequiredCount == 0)
+
+                    if missingRequiredCount == 0 {
+                        Label("All required permissions granted", systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("\(missingRequiredCount) required permission(s) still missing")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 2)
+
+                Divider().padding(.vertical, 4)
+
+                Text("Optional")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(optionalCaps, id: \.self) { cap in
                     PermissionRow(
                         capability: cap,
                         status: self.permissionMonitor.status[cap] ?? false,

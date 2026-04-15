@@ -43,6 +43,7 @@ This page describes the current CLI behavior. If commands change, update this do
 - [`approvals`](/cli/approvals)
 - [`sandbox`](/cli/sandbox)
 - [`tui`](/cli/tui)
+- [`voice`](/cli/voice)
 - [`browser`](/cli/browser)
 - [`cron`](/cli/cron)
 - [`flows`](/cli/flows)
@@ -288,6 +289,8 @@ vora [--dev] [--profile <name>] <command>
   dns
     setup
   tui
+  voice
+    doctor
 ```
 
 Note: plugins can add additional top-level commands (for example `vora voicecall`).

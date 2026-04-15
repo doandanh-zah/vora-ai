@@ -54,6 +54,12 @@ export const SUB_CLI_DESCRIPTORS = [
     hasSubcommands: false,
   },
   {
+    name: "voice",
+    description:
+      "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional Hume TTS)",
+    hasSubcommands: true,
+  },
+  {
     name: "cron",
     description: "Manage cron jobs via the Gateway scheduler",
     hasSubcommands: true,

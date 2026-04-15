@@ -155,6 +155,16 @@ const entries: SubCliEntry[] = [
     },
   },
   {
+    name: "voice",
+    description:
+      "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional Hume TTS)",
+    hasSubcommands: true,
+    register: async (program) => {
+      const mod = await import("../voice-cli.js");
+      mod.registerVoiceCli(program);
+    },
+  },
+  {
     name: "cron",
     description: "Manage cron jobs via the Gateway scheduler",
     hasSubcommands: true,

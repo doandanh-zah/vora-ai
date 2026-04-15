@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   Send, Mic, MicOff, MessageSquare, AudioLines, Settings,
   Sparkles, Trash2, X, Save, Menu, Key, Server, Cpu, Plus,
@@ -8,6 +9,53 @@ import {
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Session = { id: string; title: string; created_at: string; messages: ChatMessage[] };
+type WakeWordEventPayload = {
+  kind: 'starting' | 'ready' | 'volume' | 'trigger' | 'error' | 'log';
+  message: string;
+  model?: string;
+  score?: number;
+  volume?: number;
+  latency_ms?: number;
+};
+type ConfirmRequiredPayload = {
+  id: string;
+  action: string;
+  reason: string;
+  risk: string;
+  prompt_preview: string;
+};
+type Phase1CheckItem = {
+  key: string;
+  label: string;
+  ok: boolean;
+  message: string;
+};
+type Phase1SelfCheck = {
+  overall_ok: boolean;
+  checked_at: string;
+  items: Phase1CheckItem[];
+};
+type SpeechRecognitionAlternative = { transcript: string };
+type SpeechRecognitionResult = { isFinal: boolean; 0: SpeechRecognitionAlternative };
+type SpeechRecognitionResultList = { length: number; [index: number]: SpeechRecognitionResult };
+type SpeechRecognitionEvent = { resultIndex: number; results: SpeechRecognitionResultList };
+type SpeechRecognitionErrorEvent = { error: string };
+type SpeechRecognitionInstance = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionInstance;
+  webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+};
 
 export const ChatPage = () => {
   const [mode, setMode] = useState<'chat' | 'voice'>('chat');
@@ -19,6 +67,15 @@ export const ChatPage = () => {
   const [loading, setLoading] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceText, setVoiceText] = useState('');
+  const [wakeRunning, setWakeRunning] = useState(false);
+  const [wakeVolume, setWakeVolume] = useState(0);
+  const [wakeStatus, setWakeStatus] = useState('Wake word engine is stopped');
+  const [privacyEnabled, setPrivacyEnabled] = useState(true);
+  const [sttSupported, setSttSupported] = useState(false);
+  const [transcriptLog, setTranscriptLog] = useState<string[]>([]);
+  const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequiredPayload | null>(null);
+  const [phase1Check, setPhase1Check] = useState<Phase1SelfCheck | null>(null);
+  const [checkingPhase1, setCheckingPhase1] = useState(false);
 
   // Settings
   const [cfg, setCfg] = useState({
@@ -30,6 +87,29 @@ export const ChatPage = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const listenReasonRef = useRef<'manual' | 'wake'>('manual');
+  const privacyEnabledRef = useRef(true);
+  const loadingRef = useRef(false);
+
+  const pushVoiceLog = (text: string) => {
+    const line = `${new Date().toLocaleTimeString()}  ${text}`;
+    setTranscriptLog(prev => [line, ...prev].slice(0, 12));
+  };
+
+  const parseConfirmError = (raw: string): ConfirmRequiredPayload | null => {
+    if (!raw.includes('CONFIRM_REQUIRED:')) return null;
+    const data = raw.split('CONFIRM_REQUIRED:')[1] || '';
+    const [id, action, reason, risk] = data.split('|');
+    if (!id || !action) return null;
+    return {
+      id,
+      action,
+      reason: reason || 'Sensitive action',
+      risk: risk || 'Requires explicit confirmation',
+      prompt_preview: '',
+    };
+  };
 
   // Init: load config + sessions, create first session if none
   useEffect(() => {
@@ -47,11 +127,139 @@ export const ChatPage = () => {
           discord_token: status.discord_token || '',
           discord_guild: status.discord_guild || '',
         });
+        setPrivacyEnabled(status.privacy_enabled !== false);
       } catch (e) { console.error(e); }
 
       await refreshSessions(true);
+
+      try {
+        const running = await invoke<boolean>('get_wakeword_status');
+        setWakeRunning(running);
+        setWakeStatus(running ? 'Wake word engine running' : 'Wake word engine is stopped');
+      } catch (e) {
+        console.error('Failed to read wake status', e);
+      }
+
+      try {
+        const privacy = await invoke<boolean>('get_privacy_state');
+        setPrivacyEnabled(privacy);
+      } catch (e) {
+        console.error('Failed to read privacy state', e);
+      }
+
+      try {
+        setCheckingPhase1(true);
+        const report = await invoke<Phase1SelfCheck>('run_phase1_self_check');
+        setPhase1Check(report);
+      } catch (e) {
+        console.error('Failed to run phase1 self-check', e);
+      } finally {
+        setCheckingPhase1(false);
+      }
     })();
+
+    const maybeWindow = window as SpeechWindow;
+    const SpeechCtor = maybeWindow.SpeechRecognition || maybeWindow.webkitSpeechRecognition;
+    if (SpeechCtor) {
+      const recognition = new SpeechCtor();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'vi-VN';
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => {
+        setListening(true);
+        setVoiceText('Listening...');
+      };
+      recognition.onend = () => {
+        setListening(false);
+        setVoiceText('');
+      };
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let finalText = '';
+        let interimText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const result = event.results[i];
+          const transcript = result?.[0]?.transcript || '';
+          if (result.isFinal) finalText += transcript;
+          else interimText += transcript;
+        }
+        if (interimText.trim()) {
+          setVoiceText(interimText.trim());
+        }
+        if (finalText.trim()) {
+          const clean = finalText.trim();
+          pushVoiceLog(`STT(${listenReasonRef.current}): ${clean}`);
+          setVoiceText(clean);
+          setTimeout(() => setVoiceText(''), 1200);
+          void sendVoiceCommand(clean);
+        }
+      };
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        const msg = event?.error || 'unknown';
+        setListening(false);
+        setVoiceText('');
+        setWakeStatus(`STT error: ${msg}`);
+        pushVoiceLog(`STT error: ${msg}`);
+      };
+      recognitionRef.current = recognition;
+      setSttSupported(true);
+    } else {
+      setSttSupported(false);
+      setWakeStatus('STT not supported in this WebView');
+    }
+
+    let wakeWordUnlisten: (() => void) | null = null;
+    let confirmUnlisten: (() => void) | null = null;
+    void (async () => {
+      wakeWordUnlisten = await listen<WakeWordEventPayload>('wakeword-event', (event) => {
+        const payload = event.payload;
+        if (!payload) return;
+        if (payload.kind === 'volume' && typeof payload.volume === 'number') {
+          setWakeVolume(payload.volume);
+        }
+        if (payload.kind === 'ready') {
+          setWakeRunning(true);
+        }
+        if (payload.kind === 'error') {
+          setWakeRunning(false);
+        }
+        if (payload.kind === 'trigger') {
+          listenReasonRef.current = 'wake';
+          pushVoiceLog(`Wake detected (${payload.model || 'hey_vora'})`);
+          const recognizer = recognitionRef.current;
+          if (recognizer && privacyEnabledRef.current) {
+            try { recognizer.start(); } catch { /* ignore busy */ }
+          }
+        }
+        if (typeof payload.message === 'string' && payload.message.trim()) {
+          setWakeStatus(payload.message);
+        }
+      });
+
+      confirmUnlisten = await listen<ConfirmRequiredPayload>('confirm-required', (event) => {
+        const payload = event.payload;
+        if (!payload?.id) return;
+        setPendingConfirm(payload);
+      });
+    })();
+
+    return () => {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch { /* ignore */ }
+        recognitionRef.current = null;
+      }
+      if (wakeWordUnlisten) wakeWordUnlisten();
+      if (confirmUnlisten) confirmUnlisten();
+    };
   }, []);
+
+  useEffect(() => {
+    privacyEnabledRef.current = privacyEnabled;
+  }, [privacyEnabled]);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
 
   const refreshSessions = async (autoSelect = false) => {
     try {
@@ -103,8 +311,19 @@ export const ChatPage = () => {
     if (ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'; }
   };
 
+  const stringifyError = (error: unknown) => {
+    if (!error) return 'Unknown error';
+    if (typeof error === 'string') return error;
+    if (error instanceof Error) return error.message;
+    return String(error);
+  };
+
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
+    if (!privacyEnabled) {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Privacy mode is OFF. Enable it in Settings to send commands.' }]);
+      return;
+    }
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = '44px';
     setMessages(prev => [...prev, { role: 'user', content: text }]);
@@ -114,8 +333,40 @@ export const ChatPage = () => {
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       // Refresh sessions to update title
       refreshSessions();
-    } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e}` }]);
+    } catch (error) {
+      const raw = stringifyError(error);
+      const confirm = parseConfirmError(raw);
+      if (confirm) {
+        setPendingConfirm(confirm);
+        setMessages(prev => [...prev, { role: 'assistant', content: `Approval required: ${confirm.action}` }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${raw}` }]);
+      }
+    }
+    setLoading(false);
+  };
+
+  const sendVoiceCommand = async (transcript: string) => {
+    if (!transcript.trim() || loadingRef.current) return;
+    if (!privacyEnabledRef.current) {
+      setWakeStatus('Privacy mode is OFF. Voice command blocked.');
+      return;
+    }
+    setMessages(prev => [...prev, { role: 'user', content: transcript }]);
+    setLoading(true);
+    try {
+      const reply = await invoke<string>('inject_voice_command', { sttText: transcript });
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      refreshSessions();
+    } catch (error) {
+      const raw = stringifyError(error);
+      const confirm = parseConfirmError(raw);
+      if (confirm) {
+        setPendingConfirm(confirm);
+        setMessages(prev => [...prev, { role: 'assistant', content: `Approval required: ${confirm.action}` }]);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${raw}` }]);
+      }
     }
     setLoading(false);
   };
@@ -136,17 +387,108 @@ export const ChatPage = () => {
     setTimeout(() => setSettingsSaved(false), 2000);
   };
 
+  const runPhase1SelfCheck = async () => {
+    try {
+      setCheckingPhase1(true);
+      const report = await invoke<Phase1SelfCheck>('run_phase1_self_check');
+      setPhase1Check(report);
+    } catch (error) {
+      console.error('Phase 1 self-check failed', error);
+      setWakeStatus(`Self-check error: ${stringifyError(error)}`);
+    } finally {
+      setCheckingPhase1(false);
+    }
+  };
+
+  const startVoiceRecognition = (reason: 'manual' | 'wake') => {
+    if (!privacyEnabled) {
+      setWakeStatus('Privacy mode is OFF. Voice adapter is disabled.');
+      return;
+    }
+    const recognizer = recognitionRef.current;
+    if (!recognizer) {
+      setWakeStatus('Speech recognition not available in this WebView');
+      return;
+    }
+    listenReasonRef.current = reason;
+    try {
+      recognizer.start();
+      pushVoiceLog(`STT start (${reason})`);
+    } catch (error) {
+      setWakeStatus(`Unable to start STT: ${String(error)}`);
+    }
+  };
+
+  const stopVoiceRecognition = () => {
+    const recognizer = recognitionRef.current;
+    if (!recognizer) return;
+    try { recognizer.stop(); } catch { /* ignore */ }
+    setListening(false);
+    setVoiceText('');
+  };
+
   const toggleVoice = () => {
-    if (listening) {
-      setListening(false);
-      if (voiceText && voiceText !== 'Listening...') sendMessage(voiceText);
-      setVoiceText('');
-    } else {
-      setListening(true); setVoiceText('Listening...');
-      setTimeout(() => {
-        setVoiceText('Hello VORA');
-        setTimeout(() => { setListening(false); sendMessage('Hello VORA'); setVoiceText(''); }, 1500);
-      }, 2000);
+    if (listening) stopVoiceRecognition();
+    else startVoiceRecognition('manual');
+  };
+
+  const toggleWakeEngine = async () => {
+    try {
+      if (wakeRunning) {
+        await invoke('stop_wakeword_engine');
+        setWakeRunning(false);
+        setWakeStatus('Wake word engine stopped');
+        return;
+      }
+      if (!privacyEnabled) {
+        setWakeStatus('Enable privacy mode before starting wake word');
+        return;
+      }
+      await invoke('start_wakeword_engine');
+      setWakeStatus('Starting wake word engine...');
+    } catch (e: any) {
+      console.error(e);
+      setWakeRunning(false);
+      setWakeStatus(`Wake word error: ${String(e)}`);
+    }
+  };
+
+  const togglePrivacy = async () => {
+    const next = !privacyEnabled;
+    try {
+      await invoke('set_privacy_state', { enabled: next });
+      setPrivacyEnabled(next);
+      if (!next) {
+        stopVoiceRecognition();
+        setWakeRunning(false);
+        setWakeStatus('Privacy OFF: wake word and outbound commands paused');
+      } else {
+        setWakeStatus('Privacy ON: voice + chat pipeline enabled');
+      }
+    } catch (error) {
+      console.error('Failed to toggle privacy', error);
+    }
+  };
+
+  const resolveConfirm = async (approved: boolean) => {
+    if (!pendingConfirm) return;
+    const confirmId = pendingConfirm.id;
+    try {
+      if (!approved) {
+        await invoke('deny_confirm_request', { confirmId });
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Action denied.' }]);
+        setPendingConfirm(null);
+        return;
+      }
+      setLoading(true);
+      const reply = await invoke<string>('approve_confirm_request', { confirmId });
+      setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+      refreshSessions();
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${stringifyError(error)}` }]);
+    } finally {
+      setPendingConfirm(null);
+      setLoading(false);
     }
   };
 
@@ -209,6 +551,59 @@ export const ChatPage = () => {
               {/* === SETTINGS === */}
               {panel === 'settings' && (
                 <div className="space-y-5">
+                  {/* Phase 1 Self-check */}
+                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">🧪 Phase 1 Self-Check</p>
+                      <button
+                        onClick={runPhase1SelfCheck}
+                        disabled={checkingPhase1}
+                        className="px-2.5 py-1 rounded-md border border-white/20 text-[10px] uppercase tracking-widest text-white/60 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        {checkingPhase1 ? 'Checking...' : 'Run'}
+                      </button>
+                    </div>
+                    {!phase1Check && <p className="text-[11px] text-white/35">No report yet.</p>}
+                    {phase1Check && (
+                      <div className="space-y-1.5">
+                        <p className={`text-[11px] ${phase1Check.overall_ok ? 'text-emerald-300' : 'text-amber-300'}`}>
+                          {phase1Check.overall_ok ? 'Overall: PASS' : 'Overall: CHECK WARNINGS'}
+                        </p>
+                        {phase1Check.items.map(item => (
+                          <div key={item.key} className="rounded-md border border-white/10 bg-white/5 p-2">
+                            <p className={`text-[11px] ${item.ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                              {item.ok ? '✓' : '✗'} {item.label}
+                            </p>
+                            <p className="text-[10px] text-white/45">{item.message}</p>
+                          </div>
+                        ))}
+                        <p className="text-[10px] text-white/25">
+                          Checked at: {new Date(phase1Check.checked_at).toLocaleString()}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Privacy */}
+                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-3">
+                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">🔒 Privacy</p>
+                    <p className="text-[11px] text-white/45">
+                      {privacyEnabled
+                        ? 'ON: chat + voice pipeline active'
+                        : 'OFF: wake word and outbound commands are paused'}
+                    </p>
+                    <button
+                      onClick={togglePrivacy}
+                      className={`w-full py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider border transition-all ${
+                        privacyEnabled
+                          ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                          : 'bg-red-500/12 border-red-400/35 text-red-300'
+                      }`}
+                    >
+                      {privacyEnabled ? 'Disable Privacy Mode' : 'Enable Privacy Mode'}
+                    </button>
+                  </div>
+
                   {/* Gateway */}
                   <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-4">
                     <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">⚡ Gateway</p>
@@ -283,6 +678,36 @@ export const ChatPage = () => {
         </div>
       )}
 
+      {pendingConfirm && (
+        <div className="absolute inset-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-[#0d0d1a] p-4 space-y-3">
+            <p className="text-[10px] font-bold text-white/35 uppercase tracking-[0.18em]">Approval Required</p>
+            <h3 className="text-sm font-semibold text-white">{pendingConfirm.action}</h3>
+            <p className="text-xs text-white/60">{pendingConfirm.reason}</p>
+            <p className="text-xs text-red-300/90">Risk: {pendingConfirm.risk}</p>
+            {pendingConfirm.prompt_preview && (
+              <div className="rounded-lg bg-white/5 border border-white/10 p-2">
+                <p className="text-[11px] text-white/60 font-mono">{pendingConfirm.prompt_preview}</p>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => resolveConfirm(false)}
+                className="flex-1 py-2 rounded-lg border border-white/20 text-white/65 hover:bg-white/10 text-xs uppercase tracking-widest"
+              >
+                Deny
+              </button>
+              <button
+                onClick={() => resolveConfirm(true)}
+                className="flex-1 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-xs uppercase tracking-widest"
+              >
+                Approve Once
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="chat-header">
         <div className="flex items-center gap-2">
@@ -344,9 +769,12 @@ export const ChatPage = () => {
             <textarea
               ref={textareaRef} value={input}
               onChange={e => { setInput(e.target.value); autoResize(); }}
-              onKeyDown={handleKeyDown} placeholder="Message VORA..." rows={1} disabled={loading}
+              onKeyDown={handleKeyDown}
+              placeholder={privacyEnabled ? 'Message VORA...' : 'Enable Privacy Mode in Settings to chat'}
+              rows={1}
+              disabled={loading || !privacyEnabled}
             />
-            <button onClick={() => sendMessage(input)} disabled={loading || !input.trim()}
+            <button onClick={() => sendMessage(input)} disabled={loading || !input.trim() || !privacyEnabled}
               className="p-3 rounded-full bg-gradient-to-br from-[#6c5ce7] to-[#a29bfe] text-white disabled:opacity-30 transition-all hover:scale-105 active:scale-95 shrink-0">
               <Send size={18} />
             </button>
@@ -365,7 +793,37 @@ export const ChatPage = () => {
               {listening ? <MicOff size={40} className="text-white/90" /> : <Mic size={40} className="text-white/70" />}
             </div>
             {voiceText && <p className="text-sm italic text-white/50 text-center max-w-[260px]">"{voiceText}"</p>}
-            <p className="text-[10px] text-white/20 uppercase tracking-widest">Voice Demo</p>
+            <button
+              onClick={toggleWakeEngine}
+              className={`px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-widest border transition-all ${
+                wakeRunning
+                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                  : 'bg-white/5 border-white/15 text-white/45 hover:bg-white/10'
+              }`}
+            >
+              {wakeRunning ? 'Stop Wake Word' : 'Start Wake Word'}
+            </button>
+            <p className="text-[10px] text-white/25 text-center">{wakeStatus}</p>
+            <div className="w-[220px] h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] transition-all duration-150"
+                style={{ width: `${wakeVolume}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-white/20 uppercase tracking-widest">
+              Voice Adapter (Phase 1) • {sttSupported ? 'Web Speech STT ready' : 'STT unavailable'}
+            </p>
+          </div>
+          <div className="px-4 pb-2">
+            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2">Transcript Events</p>
+            <div className="max-h-[18vh] overflow-y-auto bg-white/5 border border-white/10 rounded-lg p-2">
+              {transcriptLog.length === 0 && (
+                <p className="text-[11px] text-white/30">No transcript events yet.</p>
+              )}
+              {transcriptLog.map((line, idx) => (
+                <p key={`${line}-${idx}`} className="text-[11px] text-white/55 font-mono leading-relaxed">{line}</p>
+              ))}
+            </div>
           </div>
           <div className="px-4 pb-4 max-h-[28vh] overflow-y-auto">
             {messages.slice(-4).map((msg, i) => (

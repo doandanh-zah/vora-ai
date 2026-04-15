@@ -77,6 +77,7 @@ struct OnboardingView: View {
     @State var workspaceApplying = false
     @State var needsBootstrap = false
     @State var didAutoKickoff = false
+    @State var didAutoRequestCorePermissions = false
     @State var showAdvancedConnection = false
     @State var preferredGatewayID: String?
     @State var remoteProbeState: RemoteOnboardingProbeState = .idle
@@ -146,7 +147,7 @@ struct OnboardingView: View {
     }
 
     var canAdvance: Bool {
-        !self.isWizardBlocking
+        !self.isWizardBlocking && !self.isRequesting
     }
 
     var devLinkCommand: String {

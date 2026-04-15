@@ -1,8 +1,12 @@
 use std::process::Command;
+use std::process::Stdio;
 use serde::{Serialize, Deserialize};
-use tauri::{AppHandle, State, Manager};
+use tauri::{AppHandle, State, Manager, Emitter};
 use std::sync::Mutex;
 use std::fs;
+use std::io::{BufRead, BufReader};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // --- Data Structures ---
 
@@ -20,7 +24,7 @@ struct ChatSession {
     messages: Vec<Message>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 struct SetupData {
     is_completed: bool,
     provider: String,
@@ -36,9 +40,44 @@ struct SetupData {
     active_session_id: String,
     #[serde(default)]
     history: Vec<Message>,
+    #[serde(default = "default_privacy_enabled")]
+    privacy_enabled: bool,
+}
+
+fn default_privacy_enabled() -> bool { true }
+
+impl Default for SetupData {
+    fn default() -> Self {
+        Self {
+            is_completed: false,
+            provider: String::new(),
+            groq_api_key: String::new(),
+            ollama_model: String::new(),
+            ollama_base_url: String::new(),
+            gateway_mode: String::new(),
+            gateway_port: 0,
+            telegram_token: String::new(),
+            discord_token: String::new(),
+            discord_guild: String::new(),
+            active_session_id: String::new(),
+            history: vec![],
+            privacy_enabled: true,
+        }
+    }
 }
 
 struct AppState(Mutex<SetupData>);
+struct WakeWordState(Mutex<Option<std::process::Child>>);
+struct ConfirmGateState(Mutex<Option<PendingConfirm>>);
+
+#[derive(Clone)]
+struct PendingConfirm {
+    id: String,
+    prompt: String,
+    action: String,
+    reason: String,
+    risk: String,
+}
 
 const VORA_SOUL: &str = r#"
 # SOUL.md - VORA IDENTITY
@@ -87,6 +126,330 @@ fn save_sessions(app: &AppHandle, sessions: &[ChatSession]) {
     ensure_config_dir(app);
     let path = get_sessions_path(app);
     fs::write(&path, serde_json::to_string(sessions).unwrap_or_default()).ok();
+}
+
+fn resolve_wakeword_python() -> Option<String> {
+    for candidate in ["python3", "python"] {
+        if Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn wakeword_project_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("wake_word")
+}
+
+#[derive(Serialize, Clone)]
+struct WakeWordEvent {
+    kind: String,
+    message: String,
+    model: Option<String>,
+    score: Option<f32>,
+    volume: Option<u8>,
+    latency_ms: Option<f64>,
+}
+
+fn emit_wakeword_event(app: &AppHandle, event: WakeWordEvent) {
+    let _ = app.emit("wakeword-event", event);
+}
+
+fn parse_and_emit_wakeword_line(app: &AppHandle, line: &str) {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    if trimmed == "READY" {
+        emit_wakeword_event(app, WakeWordEvent {
+            kind: "ready".into(),
+            message: "Wake word engine ready".into(),
+            model: None,
+            score: None,
+            volume: None,
+            latency_ms: None,
+        });
+        return;
+    }
+
+    if let Some(raw_vol) = trimmed.strip_prefix("VOLUME:") {
+        let parsed = raw_vol.trim().parse::<u8>().unwrap_or(0).min(100);
+        emit_wakeword_event(app, WakeWordEvent {
+            kind: "volume".into(),
+            message: "Mic volume update".into(),
+            model: None,
+            score: None,
+            volume: Some(parsed),
+            latency_ms: None,
+        });
+        return;
+    }
+
+    if let Some(raw_trigger) = trimmed.strip_prefix("TRIGGER:") {
+        let parts: Vec<&str> = raw_trigger.split(':').collect();
+        if parts.len() >= 3 {
+            let model = parts[0].to_string();
+            let score = parts[1].parse::<f32>().ok();
+            let ts = parts[2].parse::<f64>().ok().unwrap_or(0.0);
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            let latency_ms = if ts > 0.0 && now >= ts {
+                Some((now - ts) * 1000.0)
+            } else {
+                None
+            };
+            emit_wakeword_event(app, WakeWordEvent {
+                kind: "trigger".into(),
+                message: format!("Wake word detected: {}", model),
+                model: Some(model),
+                score,
+                volume: None,
+                latency_ms,
+            });
+            return;
+        }
+    }
+
+    if let Some(err) = trimmed.strip_prefix("ERROR:") {
+        emit_wakeword_event(app, WakeWordEvent {
+            kind: "error".into(),
+            message: err.trim().to_string(),
+            model: None,
+            score: None,
+            volume: None,
+            latency_ms: None,
+        });
+        return;
+    }
+
+    emit_wakeword_event(app, WakeWordEvent {
+        kind: "log".into(),
+        message: trimmed.to_string(),
+        model: None,
+        score: None,
+        volume: None,
+        latency_ms: None,
+    });
+}
+
+#[derive(Serialize, Clone)]
+struct ConfirmRequestEvent {
+    id: String,
+    action: String,
+    reason: String,
+    risk: String,
+    prompt_preview: String,
+}
+
+fn is_sensitive_action_prompt(prompt: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    let lower = prompt.to_lowercase();
+    let screenshot_keywords = [
+        "screenshot",
+        "screen shot",
+        "capture screen",
+        "chụp màn hình",
+        "screen recording",
+    ];
+    if screenshot_keywords.iter().any(|k| lower.contains(k)) {
+        return Some((
+            "Take Screenshot",
+            "Needs screen access to inspect current UI.",
+            "Reveals visible on-screen content.",
+        ));
+    }
+
+    let terminal_keywords = ["sudo ", "rm -rf", "chmod ", "chown ", "terminal", "shell command"];
+    if terminal_keywords.iter().any(|k| lower.contains(k)) {
+        return Some((
+            "Run Terminal Command",
+            "This command may change system or files.",
+            "Potentially destructive if incorrect.",
+        ));
+    }
+
+    let file_delete_keywords = ["delete file", "remove file", "xóa file", "drop table"];
+    if file_delete_keywords.iter().any(|k| lower.contains(k)) {
+        return Some((
+            "Delete Data",
+            "This action requests deletion of files or data.",
+            "Data loss may be irreversible.",
+        ));
+    }
+    None
+}
+
+fn prompt_preview(prompt: &str) -> String {
+    const LIMIT: usize = 120;
+    let trimmed = prompt.trim();
+    if trimmed.chars().count() <= LIMIT {
+        return trimmed.to_string();
+    }
+    let mut short = trimmed.chars().take(LIMIT).collect::<String>();
+    short.push_str("...");
+    short
+}
+
+// --- Gateway Bridge ---
+
+fn parse_json_output(output: &std::process::Output) -> Result<serde_json::Value, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "gateway call returned empty output".to_string()
+        } else {
+            stderr
+        });
+    }
+    serde_json::from_str::<serde_json::Value>(&stdout).map_err(|e| {
+        format!("failed to parse gateway JSON response: {e}; raw: {stdout}")
+    })
+}
+
+#[derive(Serialize)]
+struct Phase1CheckItem {
+    key: String,
+    label: String,
+    ok: bool,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct Phase1SelfCheck {
+    overall_ok: bool,
+    checked_at: String,
+    items: Vec<Phase1CheckItem>,
+}
+
+fn phase1_item(key: &str, label: &str, ok: bool, message: String) -> Phase1CheckItem {
+    Phase1CheckItem {
+        key: key.to_string(),
+        label: label.to_string(),
+        ok,
+        message,
+    }
+}
+
+fn call_gateway(method: &str, params: serde_json::Value, expect_final: bool) -> Result<serde_json::Value, String> {
+    let mut cmd = Command::new("vora");
+    cmd.arg("--no-color")
+        .arg("gateway")
+        .arg("call")
+        .arg(method)
+        .arg("--json")
+        .arg("--timeout")
+        .arg("120000")
+        .arg("--params")
+        .arg(params.to_string());
+    if expect_final {
+        cmd.arg("--expect-final");
+    }
+
+    let output = cmd.output().map_err(|e| format!("failed to run vora gateway call: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(format!("gateway call {method} failed: {}", detail));
+    }
+    parse_json_output(&output)
+}
+
+fn extract_text_block(content: &serde_json::Value) -> Option<String> {
+    let blocks = content.as_array()?;
+    for block in blocks {
+        let block_type = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if block_type != "text" {
+            continue;
+        }
+        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn latest_assistant_reply(history_payload: &serde_json::Value) -> Option<String> {
+    let messages = history_payload.get("messages")?.as_array()?;
+    for msg in messages.iter().rev() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        if role != "assistant" {
+            continue;
+        }
+        if let Some(content) = msg.get("content") {
+            if let Some(text) = extract_text_block(content) {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+fn session_key_for_gateway(active_session_id: &str) -> String {
+    let trimmed = active_session_id.trim();
+    if trimmed.is_empty() {
+        return "main".to_string();
+    }
+    let compact: String = trimmed
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    if compact.is_empty() {
+        "main".to_string()
+    } else {
+        format!("ui-{}", compact)
+    }
+}
+
+fn send_chat_via_gateway(prompt: &str, active_session_id: &str) -> Result<String, String> {
+    let session_key = session_key_for_gateway(active_session_id);
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let run_id = format!("ui-{}-{}", session_key, now_ms);
+
+    let send_params = serde_json::json!({
+        "sessionKey": session_key,
+        "message": prompt,
+        "deliver": false,
+        "idempotencyKey": run_id
+    });
+    let _ = call_gateway("chat.send", send_params, true)?;
+
+    // Poll short-window history so UI receives a real assistant message, not just "started".
+    for _ in 0..20 {
+        let history = call_gateway(
+            "chat.history",
+            serde_json::json!({
+                "sessionKey": session_key,
+                "limit": 12
+            }),
+            false,
+        )?;
+        if let Some(text) = latest_assistant_reply(&history) {
+            return Ok(text);
+        }
+        thread::sleep(Duration::from_millis(400));
+    }
+
+    Err("gateway accepted chat.send but no assistant reply appeared in chat.history within 8s".to_string())
 }
 
 // --- Setup Commands ---
@@ -174,6 +537,277 @@ async fn update_settings(
     ensure_config_dir(&app);
     fs::write(get_config_path(&app), serde_json::to_string(&data).unwrap()).ok();
     Ok("Settings saved".into())
+}
+
+#[tauri::command]
+async fn get_privacy_state(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.0.lock().unwrap().privacy_enabled)
+}
+
+fn stop_wakeword_process(state: &State<'_, WakeWordState>) {
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.as_mut() {
+        let _ = child.kill();
+    }
+    *guard = None;
+}
+
+#[tauri::command]
+async fn set_privacy_state(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    wake_state: State<'_, WakeWordState>,
+    enabled: bool,
+) -> Result<String, String> {
+    {
+        let mut g = state.0.lock().unwrap();
+        g.privacy_enabled = enabled;
+        ensure_config_dir(&app);
+        fs::write(get_config_path(&app), serde_json::to_string(&*g).unwrap()).ok();
+    }
+
+    if !enabled {
+        stop_wakeword_process(&wake_state);
+    }
+
+    Ok(if enabled {
+        "Privacy mode enabled".into()
+    } else {
+        "Privacy mode disabled: outbound voice/text pipeline is blocked".into()
+    })
+}
+
+#[tauri::command]
+async fn run_phase1_self_check(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Phase1SelfCheck, String> {
+    let mut items: Vec<Phase1CheckItem> = vec![];
+
+    let privacy_enabled = state.0.lock().unwrap().privacy_enabled;
+    items.push(phase1_item(
+        "privacy_state",
+        "Privacy Toggle State",
+        true,
+        if privacy_enabled {
+            "Privacy mode is ON".into()
+        } else {
+            "Privacy mode is OFF (commands are intentionally blocked)".into()
+        },
+    ));
+
+    let gateway_check = Command::new("vora")
+        .arg("--no-color")
+        .arg("gateway")
+        .arg("status")
+        .arg("--json")
+        .output();
+    match gateway_check {
+        Ok(out) if out.status.success() => {
+            let parsed = parse_json_output(&out).ok();
+            let rpc_ok = parsed
+                .as_ref()
+                .and_then(|v| v.get("rpc"))
+                .and_then(|v| v.get("ok"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            items.push(phase1_item(
+                "gateway_rpc",
+                "Gateway RPC Reachable",
+                rpc_ok,
+                if rpc_ok {
+                    "Gateway is running and RPC responds".into()
+                } else {
+                    "Gateway status command ran, but rpc.ok is false".into()
+                },
+            ));
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            items.push(phase1_item(
+                "gateway_rpc",
+                "Gateway RPC Reachable",
+                false,
+                if stderr.is_empty() {
+                    "Failed to run `vora gateway status --json`".into()
+                } else {
+                    stderr
+                },
+            ));
+        }
+        Err(err) => {
+            items.push(phase1_item(
+                "gateway_rpc",
+                "Gateway RPC Reachable",
+                false,
+                format!("Failed to execute gateway status: {err}"),
+            ));
+        }
+    }
+
+    let wake_dir = wakeword_project_dir();
+    items.push(phase1_item(
+        "wakeword_dir",
+        "Wake Word Directory",
+        wake_dir.exists(),
+        if wake_dir.exists() {
+            format!("Found {}", wake_dir.display())
+        } else {
+            format!("Missing {}", wake_dir.display())
+        },
+    ));
+
+    let wake_model = wake_dir.join("hey_vora.onnx");
+    items.push(phase1_item(
+        "wakeword_model",
+        "Wake Word Model File",
+        wake_model.exists(),
+        if wake_model.exists() {
+            format!("Found {}", wake_model.display())
+        } else {
+            format!("Missing {}", wake_model.display())
+        },
+    ));
+
+    let py = resolve_wakeword_python();
+    items.push(phase1_item(
+        "python_runtime",
+        "Python Runtime (wake_word/main.py)",
+        py.is_some(),
+        py.map(|name| format!("Detected `{name}` in PATH"))
+            .unwrap_or_else(|| "Need python3 or python in PATH".into()),
+    ));
+
+    let cfg_path = get_config_path(&app);
+    items.push(phase1_item(
+        "setup_config",
+        "Setup Config File",
+        cfg_path.exists(),
+        if cfg_path.exists() {
+            format!("Found {}", cfg_path.display())
+        } else {
+            format!("Not found yet: {}", cfg_path.display())
+        },
+    ));
+
+    let overall_ok = items.iter().all(|item| item.ok || item.key == "privacy_state");
+    Ok(Phase1SelfCheck {
+        overall_ok,
+        checked_at: chrono::Utc::now().to_rfc3339(),
+        items,
+    })
+}
+
+#[tauri::command]
+async fn get_wakeword_status(state: State<'_, WakeWordState>) -> Result<bool, String> {
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.as_mut() {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            *guard = None;
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+async fn stop_wakeword_engine(state: State<'_, WakeWordState>) -> Result<String, String> {
+    stop_wakeword_process(&state);
+    Ok("Wake word engine stopped".into())
+}
+
+#[tauri::command]
+async fn start_wakeword_engine(
+    app: AppHandle,
+    state: State<'_, WakeWordState>,
+    app_state: State<'_, AppState>,
+    model: Option<String>,
+    threshold: Option<f32>,
+) -> Result<String, String> {
+    if !app_state.0.lock().unwrap().privacy_enabled {
+        return Err("Privacy mode is disabled. Enable it before starting wake word.".into());
+    }
+
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.as_mut() {
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            return Ok("Wake word engine already running".into());
+        }
+        *guard = None;
+    }
+
+    let python = resolve_wakeword_python()
+        .ok_or_else(|| "Python runtime not found (need python3 or python in PATH)".to_string())?;
+    let wake_dir = wakeword_project_dir();
+    if !wake_dir.exists() {
+        return Err(format!("wake_word directory not found at {}", wake_dir.display()));
+    }
+
+    let model_arg = model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "hey_vora.onnx".into());
+    let threshold_arg = threshold.unwrap_or(0.5).clamp(0.0, 1.0);
+
+    let mut child = Command::new(&python)
+        .arg("main.py")
+        .arg("--model")
+        .arg(model_arg.clone())
+        .arg("--threshold")
+        .arg(threshold_arg.to_string())
+        .current_dir(&wake_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to start wake word engine: {e}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture wake word stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture wake word stderr".to_string())?;
+
+    let app_for_stdout = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            parse_and_emit_wakeword_line(&app_for_stdout, &line);
+        }
+    });
+
+    let app_for_stderr = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let msg = line.trim().to_string();
+            if msg.is_empty() {
+                continue;
+            }
+            emit_wakeword_event(&app_for_stderr, WakeWordEvent {
+                kind: "error".into(),
+                message: msg,
+                model: None,
+                score: None,
+                volume: None,
+                latency_ms: None,
+            });
+        }
+    });
+
+    *guard = Some(child);
+    emit_wakeword_event(&app, WakeWordEvent {
+        kind: "starting".into(),
+        message: format!("Starting wake word engine with model {}", model_arg),
+        model: Some(model_arg),
+        score: None,
+        volume: None,
+        latency_ms: None,
+    });
+    Ok("Wake word engine started".into())
 }
 
 // --- Session Commands ---
@@ -275,53 +909,71 @@ fn build_cross_session_context(app: &AppHandle, current_session_id: &str) -> Str
 }
 
 #[tauri::command]
-async fn send_chat(app: AppHandle, state: State<'_, AppState>, prompt: String) -> Result<String, String> {
+async fn send_chat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirm_state: State<'_, ConfirmGateState>,
+    prompt: String,
+) -> Result<String, String> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return Err("prompt is empty".into());
+    }
+
+    if let Some((action, reason, risk)) = is_sensitive_action_prompt(trimmed) {
+        let pending = PendingConfirm {
+            id: uuid::Uuid::new_v4().to_string(),
+            prompt: trimmed.to_string(),
+            action: action.to_string(),
+            reason: reason.to_string(),
+            risk: risk.to_string(),
+        };
+        let confirm_payload = ConfirmRequestEvent {
+            id: pending.id.clone(),
+            action: pending.action.clone(),
+            reason: pending.reason.clone(),
+            risk: pending.risk.clone(),
+            prompt_preview: prompt_preview(trimmed),
+        };
+        {
+            let mut guard = confirm_state.0.lock().unwrap();
+            *guard = Some(pending.clone());
+        }
+        let _ = app.emit("confirm-required", confirm_payload);
+        return Err(format!(
+            "CONFIRM_REQUIRED:{}|{}|{}|{}",
+            pending.id, pending.action, pending.reason, pending.risk
+        ));
+    }
+
+    run_chat_pipeline(&app, &state, trimmed)
+}
+
+fn run_chat_pipeline(app: &AppHandle, state: &State<'_, AppState>, prompt: &str) -> Result<String, String> {
     let (data, memory_path, session_id_for_context) = {
         let g = state.0.lock().unwrap();
         (g.clone(), get_memory_path(&app), g.active_session_id.clone())
     };
 
-    let long_term_memory = if memory_path.exists() {
+    if !data.privacy_enabled {
+        return Err("Privacy mode is disabled. Enable privacy mode to send commands.".into());
+    }
+
+    let _long_term_memory = if memory_path.exists() {
         fs::read_to_string(&memory_path).unwrap_or_default()
     } else { String::new() };
 
-    // Build cross-session context (memories from other sessions)
-    let cross_session_ctx = build_cross_session_context(&app, &session_id_for_context);
+    let _cross_session_ctx = build_cross_session_context(&app, &session_id_for_context);
+    let _system_prompt = VORA_SOUL;
+    let _provider_hint = data.provider.clone();
 
-    let system_prompt = format!(
-        "{}\n\n## Long-term Memory (RAG)\n{}\n\n{}\n\nRespond as VORA. You have continuity across sessions — use the previous session context to remember the user's preferences, name, and past topics.",
-        VORA_SOUL, long_term_memory, cross_session_ctx
-    );
-
-    let mut messages = vec![Message { role: "system".into(), content: system_prompt }];
-    for msg in data.history.iter().rev().take(20).rev() {
-        messages.push(msg.clone());
-    }
-    messages.push(Message { role: "user".into(), content: prompt.clone() });
-
-    let ollama_model = if data.ollama_model.is_empty() { "llama3.2".to_string() } else { data.ollama_model.clone() };
-    let ollama_url = if data.ollama_base_url.is_empty() { "http://localhost:11434".to_string() } else { data.ollama_base_url.clone() };
-
-    let client = reqwest::Client::new();
-    let reply = if data.provider == "groq" {
-        let resp = client.post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", data.groq_api_key))
-            .json(&serde_json::json!({ "model": "llama-3.3-70b-versatile", "messages": messages }))
-            .send().await.map_err(|e| e.to_string())?;
-        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        json["choices"][0]["message"]["content"].as_str().unwrap_or("Error").to_string()
-    } else {
-        let resp = client.post(format!("{}/api/chat", ollama_url))
-            .json(&serde_json::json!({ "model": ollama_model, "messages": messages, "stream": false }))
-            .send().await.map_err(|e| e.to_string())?;
-        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        json["message"]["content"].as_str().unwrap_or("Error").to_string()
-    };
+    // Phase 1 bridge: route chat through the real VORA gateway/agent pipeline.
+    let reply = send_chat_via_gateway(prompt, &session_id_for_context)?;
 
     // Save to state
     let session_id = {
         let mut g = state.0.lock().unwrap();
-        g.history.push(Message { role: "user".into(), content: prompt.clone() });
+        g.history.push(Message { role: "user".into(), content: prompt.to_string() });
         g.history.push(Message { role: "assistant".into(), content: reply.clone() });
         g.active_session_id.clone()
     };
@@ -330,7 +982,7 @@ async fn send_chat(app: AppHandle, state: State<'_, AppState>, prompt: String) -
     if !session_id.is_empty() {
         let mut sessions = load_sessions(&app);
         if let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) {
-            s.messages.push(Message { role: "user".into(), content: prompt.clone() });
+            s.messages.push(Message { role: "user".into(), content: prompt.to_string() });
             s.messages.push(Message { role: "assistant".into(), content: reply.clone() });
             if s.title == "New Chat" {
                 s.title = prompt.chars().take(40).collect::<String>();
@@ -343,22 +995,82 @@ async fn send_chat(app: AppHandle, state: State<'_, AppState>, prompt: String) -
     Ok(reply)
 }
 
+#[tauri::command]
+async fn inject_voice_command(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirm_state: State<'_, ConfirmGateState>,
+    stt_text: String,
+) -> Result<String, String> {
+    let trimmed = stt_text.trim();
+    if trimmed.is_empty() {
+        return Err("voice transcript is empty".into());
+    }
+    send_chat(app, state, confirm_state, trimmed.to_string()).await
+}
+
+#[tauri::command]
+async fn approve_confirm_request(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirm_state: State<'_, ConfirmGateState>,
+    confirm_id: String,
+) -> Result<String, String> {
+    let pending = {
+        let mut guard = confirm_state.0.lock().unwrap();
+        match guard.as_ref() {
+            Some(req) if req.id == confirm_id => {}
+            Some(_) => return Err("confirm request id mismatch".into()),
+            None => return Err("no pending confirm request".into()),
+        }
+        guard.take().unwrap()
+    };
+    run_chat_pipeline(&app, &state, &pending.prompt)
+}
+
+#[tauri::command]
+async fn deny_confirm_request(
+    confirm_state: State<'_, ConfirmGateState>,
+    confirm_id: String,
+) -> Result<String, String> {
+    let mut guard = confirm_state.0.lock().unwrap();
+    match guard.as_ref() {
+        Some(req) if req.id == confirm_id => {
+            *guard = None;
+            Ok("Denied".into())
+        }
+        Some(_) => Err("confirm request id mismatch".into()),
+        None => Err("no pending confirm request".into()),
+    }
+}
+
 // --- Keep old hatch_test_prompt as alias ---
 #[tauri::command]
-async fn hatch_test_prompt(app: AppHandle, state: State<'_, AppState>, prompt: String) -> Result<String, String> {
-    send_chat(app, state, prompt).await
+async fn hatch_test_prompt(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    confirm_state: State<'_, ConfirmGateState>,
+    prompt: String,
+) -> Result<String, String> {
+    send_chat(app, state, confirm_state, prompt).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState(Mutex::new(SetupData::default())))
+        .manage(WakeWordState(Mutex::new(None)))
+        .manage(ConfirmGateState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_setup_status, start_setup_session, select_gateway_mode,
             set_gateway_port, install_gateway_service, select_model_provider,
             save_groq_api_key, verify_ollama_installed, commit_setup_config,
+            get_privacy_state, set_privacy_state,
+            run_phase1_self_check,
+            get_wakeword_status, start_wakeword_engine, stop_wakeword_engine,
             update_settings, list_sessions, create_session, load_session,
-            delete_session, send_chat, hatch_test_prompt
+            delete_session, send_chat, inject_voice_command,
+            approve_confirm_request, deny_confirm_request, hatch_test_prompt
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

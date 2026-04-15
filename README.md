@@ -145,6 +145,14 @@ Mic
 - **Landing page:** Next.js + Vercel
 - **Waitlist:** Tally.so (MVP)
 
+### New backend module (Auth + Credits)
+- Location: `backend/`
+- Purpose:
+  - user login/session (JWT + refresh token),
+  - per-user action logs,
+  - credit ledger,
+  - Solana payment intent/confirm scaffold for future credit purchase flow.
+
 ### Why Agora for MVP
 - single integrated voice pipeline,
 - lower integration complexity,

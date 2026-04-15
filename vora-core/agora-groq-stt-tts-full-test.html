@@ -141,12 +141,20 @@
         Minimal UI: fill required fields, then click Start. This page does full voice loop:
         Mic -> Agora STT -> Groq -> Agora TTS audio.
       </p>
+      <p class="hint">
+        Hardcoded test profile is prefilled for your Agora project. Generated on 2026-04-08 and
+        expected to expire around 2026-04-09 (+07).
+      </p>
+      <p class="hint">
+        Start local proxy first: <code>node agora-rest-proxy.cjs</code>. Keep API base as local
+        proxy unless you explicitly test direct REST calls.
+      </p>
 
       <section class="panel">
         <div class="grid3">
           <div>
             <label for="appId">Agora App ID</label>
-            <input id="appId" placeholder="your_agora_app_id" />
+            <input id="appId" value="8b9ae9ad4e2840c980f3cdb397559179" />
           </div>
           <div>
             <label for="channel">Channel</label>
@@ -160,19 +168,41 @@
 
         <div class="grid">
           <div>
+            <label for="authMode">REST Auth Mode</label>
+            <select id="authMode">
+              <option value="token" selected>agora token=...</option>
+              <option value="basic">Basic key:secret</option>
+            </select>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="grid">
+          <div>
             <label for="restToken">Agora REST Auth Token (for Authorization: agora token=...)</label>
-            <input id="restToken" type="password" placeholder="your_conversational_ai_token" />
+            <input id="restToken" type="password" value="007eJxTYJiYdUDzoPnhhxHBG34Frp2Z6/BbUMHm4LVYaQM7y4etd9kVGCySLBNTLRNTTFKNLEwMki0tDNKMk1OSjC3NTU0tDc0tjY9ezWwIZGQ4NGEjIxMDIwMLAyMDiM8EJpnBJAuY5Gcoyy9K1C0szUzO1i1JLS5hYTA0MDAEaWKEKgPxAXbPKTI=" />
+          </div>
+          <div>
+            <label for="restKey">REST Key (for Basic mode)</label>
+            <input id="restKey" type="password" value="799f5854ca514ee28dd680d15eb9a456" />
+          </div>
+        </div>
+
+        <div class="grid">
+          <div>
+            <label for="restSecret">REST Secret (for Basic mode)</label>
+            <input id="restSecret" type="password" value="c0884f2965c742a68121f695fa440c53" />
           </div>
           <div>
             <label for="rtcToken">Browser RTC Token (for Browser UID)</label>
-            <input id="rtcToken" type="password" placeholder="rtc_token_for_browser_uid" />
+            <input id="rtcToken" type="password" value="007eJxTYDhqXxjz4UPF07ee/YtzDcu5dZR3LDl6s1s3eG71+RtxRQsUGCySLBNTLRNTTFKNLEwMki0tDNKMk1OSjC3NTU0tDc0tjY9ezWyw4mQwvtjFyMjAyMDCwMgA4jOBSWYwyQIm+RnK8osSdQtLM5OzdUtSi0tYGAwNDIwAel4obg==" />
           </div>
         </div>
 
         <div class="grid">
           <div>
             <label for="agentRtcToken">Agent RTC Token (optional, fallback = Browser RTC Token)</label>
-            <input id="agentRtcToken" type="password" placeholder="rtc_token_for_agent_uid" />
+            <input id="agentRtcToken" type="password" value="007eJxTYHhf+o3hB/sRTm3XXjU17tJ39y6LNu/edS31mCDzxs3vM58oMFgkWSamWiammKQaWZgYJFtaGKQZJ6ckGVuam5paGppbGh+9mtkQyMhQ/tKXiYmBkYGFgZEBxGcCk8xgkgVM8jOU5Rcl6haWZiZn65akFpewMBgaGBiCNDFClYH4AKwiKaw=" />
           </div>
           <div></div>
         </div>
@@ -193,7 +223,7 @@
           <div class="grid" style="margin-top: 10px">
             <div>
               <label for="apiBase">REST API Base</label>
-              <input id="apiBase" value="https://api.agora.io/api/conversational-ai-agent/v2" />
+              <input id="apiBase" value="http://127.0.0.1:8787/api/conversational-ai-agent/v2" />
             </div>
             <div>
               <label for="language">ASR Language</label>
@@ -268,6 +298,15 @@
       }
 
       function getAuthHeader() {
+        const mode = $("authMode")?.value || "token";
+        if (mode === "basic") {
+          const key = $("restKey").value.trim();
+          const secret = $("restSecret").value.trim();
+          if (!key || !secret) {
+            throw new Error("Missing REST key/secret for Basic auth mode.");
+          }
+          return `Basic ${btoa(`${key}:${secret}`)}`;
+        }
         const token = $("restToken").value.trim();
         if (!token) {
           throw new Error("Missing Agora REST auth token.");
@@ -451,6 +490,13 @@
 
       async function startAll() {
         try {
+          if (window.location.protocol === "file:") {
+            throw new Error("Do not open via file://. Serve with http://127.0.0.1:8080.");
+          }
+          const apiBase = getApiBase();
+          if (apiBase.includes("api.agora.io")) {
+            logEvent("Using direct api.agora.io from browser may fail due to CORS. Prefer local proxy.", "error");
+          }
           setStatus("starting...");
           await joinRtc();
           const payload = buildJoinPayload();
@@ -463,8 +509,19 @@
           logEvent(`Agent started: ${agentId}`, "ok");
           startPolling();
         } catch (err) {
-          setStatus("error", err.message, true);
-          logEvent(err.message, "error");
+          const message = err && err.message ? err.message : String(err);
+          setStatus("error", message, true);
+          logEvent(message, "error");
+          if (message.includes("allocate failed") || message.includes("appid is valid")) {
+            logEvent(
+              "Hint: This App ID is not ready for Conversational AI allocation. Check project activation/quota in Agora Console.",
+              "error",
+            );
+            logEvent(
+              "Also confirm REST token and RTC tokens are generated from the same App ID + Certificate.",
+              "error",
+            );
+          }
         }
       }
 

@@ -2,6 +2,14 @@ import Foundation
 import VoraIPC
 
 extension OnboardingView {
+    var requiredPermissionCaps: [Capability] {
+        [.appleScript, .accessibility, .screenRecording]
+    }
+
+    var missingRequiredPermissionCaps: [Capability] {
+        self.requiredPermissionCaps.filter { !(self.permissionMonitor.status[$0] ?? false) }
+    }
+
     @MainActor
     func refreshPerms() async {
         await self.permissionMonitor.refreshNow()
@@ -14,6 +22,27 @@ extension OnboardingView {
         defer { isRequesting = false }
         _ = await PermissionManager.ensure([cap], interactive: true)
         await self.refreshPerms()
+    }
+
+    @MainActor
+    func requestRequiredPermissionsIfNeeded() async {
+        let missing = self.missingRequiredPermissionCaps
+        guard !missing.isEmpty else { return }
+        guard !self.isRequesting else { return }
+        self.isRequesting = true
+        defer { self.isRequesting = false }
+        _ = await PermissionManager.ensure(missing, interactive: true)
+        await self.refreshPerms()
+    }
+
+    func maybeAutoRequestRequiredPermissions(for pageIndex: Int) {
+        guard self.state.connectionMode == .local else { return }
+        guard pageIndex == self.permissionsPageIndex else { return }
+        guard !self.didAutoRequestCorePermissions else { return }
+        self.didAutoRequestCorePermissions = true
+        Task { @MainActor in
+            await self.requestRequiredPermissionsIfNeeded()
+        }
     }
 
     func updatePermissionMonitoring(for pageIndex: Int) {
@@ -42,6 +71,7 @@ extension OnboardingView {
     func updateMonitoring(for pageIndex: Int) {
         self.updatePermissionMonitoring(for: pageIndex)
         self.updateDiscoveryMonitoring(for: pageIndex)
+        self.maybeAutoRequestRequiredPermissions(for: pageIndex)
         self.maybeKickoffOnboardingChat(for: pageIndex)
     }
 
