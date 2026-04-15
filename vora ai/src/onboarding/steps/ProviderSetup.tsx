@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowRight, Key, Download, RefreshCw, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Key, Download, RefreshCw, CheckCircle2, ExternalLink } from 'lucide-react';
 
 export const ProviderSetup = ({ 
   provider, 

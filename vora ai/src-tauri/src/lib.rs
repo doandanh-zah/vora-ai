@@ -307,15 +307,35 @@ async fn send_chat(app: AppHandle, state: State<'_, AppState>, prompt: String) -
         let resp = client.post("https://api.groq.com/openai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", data.groq_api_key))
             .json(&serde_json::json!({ "model": "llama-3.3-70b-versatile", "messages": messages }))
-            .send().await.map_err(|e| e.to_string())?;
-        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        json["choices"][0]["message"]["content"].as_str().unwrap_or("Error").to_string()
+            .send().await;
+        match resp {
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                let json: Result<serde_json::Value, _> = serde_json::from_str(&text);
+                match json {
+                    Ok(json) => json["choices"][0]["message"]["content"].as_str().unwrap_or(&format!("API Error: {text}")).to_string(),
+                    Err(_) => format!("API Error (status {}): {text}", status),
+                }
+            },
+            Err(e) => format!("Request Error: {}", e),
+        }
     } else {
         let resp = client.post(format!("{}/api/chat", ollama_url))
             .json(&serde_json::json!({ "model": ollama_model, "messages": messages, "stream": false }))
-            .send().await.map_err(|e| e.to_string())?;
-        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        json["message"]["content"].as_str().unwrap_or("Error").to_string()
+            .send().await;
+        match resp {
+            Ok(resp) => {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                let json: Result<serde_json::Value, _> = serde_json::from_str(&text);
+                match json {
+                    Ok(json) => json["message"]["content"].as_str().unwrap_or(&format!("API Error: {text}")).to_string(),
+                    Err(_) => format!("API Error (status {}): {text}", status),
+                }
+            },
+            Err(e) => format!("Request Error: {}", e),
+        }
     };
 
     // Save to state
