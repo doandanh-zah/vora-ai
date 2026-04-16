@@ -21,6 +21,22 @@ export type AuthChoiceGroup = {
 
 export const CORE_AUTH_CHOICE_OPTIONS: ReadonlyArray<AuthChoiceOption> = [
   {
+    value: "openai-codex",
+    label: "OpenAI (OAuth)",
+    hint: "Sign in with OpenAI OAuth (recommended)",
+    groupId: "openai",
+    groupLabel: "OpenAI",
+    groupHint: "GPT models via OpenAI",
+  },
+  {
+    value: "openai-api-key",
+    label: "OpenAI API Key",
+    hint: "Use OPENAI_API_KEY",
+    groupId: "openai",
+    groupLabel: "OpenAI",
+    groupHint: "GPT models via OpenAI",
+  },
+  {
     value: "groq-api-key",
     label: "Groq (Cloud/Fast)",
     hint: "Use Groq's high-speed inference endpoints",
