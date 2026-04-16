@@ -64,4 +64,12 @@ export const config = {
     receiverAddress: readText("SOLANA_RECEIVER_ADDRESS", ""),
     verifyOnChain: readBool("SOLANA_VERIFY_ONCHAIN", false),
   },
+  agora: {
+    appId: readText("AGORA_APP_ID", ""),
+    appCertificate: readText("AGORA_APP_CERTIFICATE", ""),
+  },
+  hume: {
+    apiKey: readText("HUME_API_KEY", ""),
+    secretKey: readText("HUME_SECRET_KEY", ""),
+  },
 };

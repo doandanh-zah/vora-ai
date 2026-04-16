@@ -6,6 +6,7 @@ import { createAuthRouter } from "./routes/auth.routes.js";
 import { createActionsRouter } from "./routes/actions.routes.js";
 import { createCreditsRouter } from "./routes/credits.routes.js";
 import { createPaymentsRouter } from "./routes/payments.routes.js";
+import { createIntegrationsRouter } from "./routes/integrations.routes.js";
 
 async function bootstrap() {
   const app = express();
@@ -56,6 +57,7 @@ async function bootstrap() {
   app.use("/api/actions", createActionsRouter({ config, store }));
   app.use("/api/credits", createCreditsRouter({ config, store }));
   app.use("/api/payments", createPaymentsRouter({ config, store }));
+  app.use("/api", createIntegrationsRouter({ config }));
 
   app.use((err, _req, res, _next) => {
     // eslint-disable-next-line no-console
