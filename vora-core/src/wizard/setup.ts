@@ -120,6 +120,74 @@ async function requireRiskAcknowledgement(params: {
   }
 }
 
+function shouldRunQuickstartVoiceSetup(params: { flow: WizardFlow; opts: OnboardOptions }) {
+  if (params.flow !== "quickstart") {
+    return false;
+  }
+  if (params.opts.skipVoice || params.opts.nonInteractive) {
+    return false;
+  }
+  const disabled = process.env.VORA_ONBOARD_SKIP_VOICE_SETUP ?? process.env.VORA_SKIP_VOICE_SETUP;
+  return disabled !== "1" && disabled !== "true";
+}
+
+function formatVoiceSetupFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const common = [
+    `Automatic voice setup did not complete: ${message}`,
+    "",
+    "Onboarding will continue. Voice can be repaired after setup:",
+    formatCliCommand("vora voice setup"),
+    formatCliCommand("vora voice doctor --json"),
+  ];
+  if (process.platform === "win32") {
+    return [
+      ...common,
+      "",
+      "Windows notes:",
+      "- Install Python 3.11 first if Python is missing.",
+      "- Suggested command: winget install Python.Python.3.11",
+      "- Reopen PowerShell after installing Python, then run the commands above.",
+    ].join("\n");
+  }
+  return common.join("\n");
+}
+
+async function setupQuickstartVoiceRuntime(params: {
+  flow: WizardFlow;
+  opts: OnboardOptions;
+  runtime: RuntimeEnv;
+  prompter: WizardPrompter;
+}) {
+  if (!shouldRunQuickstartVoiceSetup({ flow: params.flow, opts: params.opts })) {
+    return;
+  }
+
+  await params.prompter.note(
+    [
+      "QuickStart will prepare terminal voice runtime now.",
+      "This installs wake-word Python dependencies into ~/.vora/voice-python.",
+      "STT/TTS use the VORA backend by default, so local Agora/Hume keys are not required.",
+    ].join("\n"),
+    "Voice runtime",
+  );
+
+  try {
+    const { runVoiceSetup } = await import("../cli/voice-cli.js");
+    await runVoiceSetup({}, params.runtime);
+    await params.prompter.note(
+      [
+        "Voice runtime is ready.",
+        `Check anytime: ${formatCliCommand("vora voice doctor --json")}`,
+        `Start voice mode: ${formatCliCommand("vora voice")}`,
+      ].join("\n"),
+      "Voice runtime",
+    );
+  } catch (error) {
+    await params.prompter.note(formatVoiceSetupFailure(error), "Voice runtime");
+  }
+}
+
 export async function runSetupWizard(
   opts: OnboardOptions,
   runtime: RuntimeEnv = defaultRuntime,
@@ -629,6 +697,13 @@ export async function runSetupWizard(
   // Setup hooks (session memory on /new)
   const { setupInternalHooks } = await import("../commands/onboard-hooks.js");
   nextConfig = await setupInternalHooks(nextConfig, runtime, prompter);
+
+  await setupQuickstartVoiceRuntime({
+    flow,
+    opts,
+    runtime,
+    prompter,
+  });
 
   nextConfig = onboardHelpers.applyWizardMetadata(nextConfig, { command: "onboard", mode });
   await writeConfigFile(nextConfig);

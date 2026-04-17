@@ -24,22 +24,26 @@ function readBundledPluginPackageJson(packageJsonPath) {
 
 function isManifestlessBundledRuntimeSupportPackage(params) {
   const packageName = typeof params.packageJson?.name === "string" ? params.packageJson.name : "";
-  if (packageName !== `@openclaw/${params.dirName}`) {
+  if (packageName !== `@vora/${params.dirName}` && packageName !== `@openclaw/${params.dirName}`) {
     return false;
   }
   return params.topLevelPublicSurfaceEntries.length > 0;
 }
 
+function readBundledPluginPackageConfig(packageJson) {
+  return packageJson?.vora ?? packageJson?.openclaw;
+}
+
 function collectPluginSourceEntries(packageJson) {
-  let packageEntries = Array.isArray(packageJson?.openclaw?.extensions)
-    ? packageJson.openclaw.extensions.filter(
+  const pluginConfig = readBundledPluginPackageConfig(packageJson);
+  let packageEntries = Array.isArray(pluginConfig?.extensions)
+    ? pluginConfig.extensions.filter(
         (entry) => typeof entry === "string" && entry.trim().length > 0,
       )
     : [];
   const setupEntry =
-    typeof packageJson?.openclaw?.setupEntry === "string" &&
-    packageJson.openclaw.setupEntry.trim().length > 0
-      ? packageJson.openclaw.setupEntry
+    typeof pluginConfig?.setupEntry === "string" && pluginConfig.setupEntry.trim().length > 0
+      ? pluginConfig.setupEntry
       : undefined;
   if (setupEntry) {
     packageEntries = Array.from(new Set([...packageEntries, setupEntry]));
@@ -48,7 +52,7 @@ function collectPluginSourceEntries(packageJson) {
 }
 
 function shouldStageBundledPluginRuntimeDependencies(packageJson) {
-  return packageJson?.openclaw?.bundle?.stageRuntimeDependencies === true;
+  return readBundledPluginPackageConfig(packageJson)?.bundle?.stageRuntimeDependencies === true;
 }
 
 function collectTopLevelPublicSurfaceEntries(pluginDir) {
@@ -97,7 +101,15 @@ export function collectBundledPluginBuildEntries(params = {}) {
     }
 
     const pluginDir = path.join(extensionsRoot, dirent.name);
-    const manifestPath = path.join(pluginDir, "openclaw.plugin.json");
+    const manifestCandidates = [
+      ["vora.plugin.json", path.join(pluginDir, "vora.plugin.json")],
+      ["openclaw.plugin.json", path.join(pluginDir, "openclaw.plugin.json")],
+    ];
+    const manifestCandidate =
+      manifestCandidates.find(([, candidatePath]) => fs.existsSync(candidatePath)) ??
+      manifestCandidates[0];
+    const manifestFileName = manifestCandidate[0];
+    const manifestPath = manifestCandidate[1];
     const hasManifest = fs.existsSync(manifestPath);
     const packageJsonPath = path.join(pluginDir, "package.json");
     const packageJson = readBundledPluginPackageJson(packageJsonPath);
@@ -119,6 +131,7 @@ export function collectBundledPluginBuildEntries(params = {}) {
     entries.push({
       id: dirent.name,
       hasManifest,
+      manifestFileName,
       hasPackageJson: packageJson !== null,
       packageJson,
       sourceEntries: Array.from(
@@ -151,9 +164,9 @@ export function listBundledPluginPackArtifacts(params = {}) {
   );
   const artifacts = new Set();
 
-  for (const { id, hasManifest, hasPackageJson, sourceEntries } of entries) {
+  for (const { id, hasManifest, manifestFileName, hasPackageJson, sourceEntries } of entries) {
     if (hasManifest) {
-      artifacts.add(bundledDistPluginFile(id, "openclaw.plugin.json"));
+      artifacts.add(bundledDistPluginFile(id, manifestFileName));
     }
     if (hasPackageJson) {
       artifacts.add(bundledDistPluginFile(id, "package.json"));

@@ -5,6 +5,7 @@ import {
   copyBundledPluginMetadata,
   rewritePackageExtensions,
 } from "../../scripts/copy-bundled-plugin-metadata.mjs";
+import { listBundledPluginBuildEntries } from "../../scripts/lib/bundled-plugin-build-entries.mjs";
 import { cleanupTempDirs, makeTempRepoRoot, writeJsonFile } from "../../test/helpers/temp-repo.js";
 
 const tempDirs: string[] = [];
@@ -95,6 +96,20 @@ describe("rewritePackageExtensions", () => {
 });
 
 describe("copyBundledPluginMetadata", () => {
+  it("discovers VORA bundled plugin build entries from vora.plugin.json and package vora config", () => {
+    const repoRoot = makeRepoRoot("vora-bundled-plugin-build-entries-");
+    const pluginDir = createPlugin(repoRoot, {
+      id: "openai",
+      packageName: "@vora/openai-provider",
+      packageVora: { extensions: ["./index.ts"] },
+    });
+    fs.writeFileSync(path.join(pluginDir, "index.ts"), "export default {};\n", "utf8");
+
+    expect(listBundledPluginBuildEntries({ cwd: repoRoot })).toMatchObject({
+      "extensions/openai/index": "extensions/openai/index.ts",
+    });
+  });
+
   it("copies plugin manifests, package metadata, and local skill directories", () => {
     const repoRoot = makeRepoRoot("vora-bundled-plugin-meta-");
     const pluginDir = createPlugin(repoRoot, {

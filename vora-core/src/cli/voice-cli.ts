@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import type { Command } from "commander";
-import { defaultRuntime } from "../runtime.js";
+import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { theme } from "../terminal/theme.js";
 import { GatewayChatClient } from "../tui/gateway-chat.js";
@@ -1066,16 +1066,16 @@ function brewFormulaInstalled(formula: string): boolean {
   return result.status === 0 && String(result.stdout ?? "").trim().length > 0;
 }
 
-async function ensureMacVoiceBuildDependencies(): Promise<void> {
+async function ensureMacVoiceBuildDependencies(runtime: RuntimeEnv = defaultRuntime): Promise<void> {
   if (process.platform !== "darwin" || !commandSucceeds("brew", ["--version"])) {
     return;
   }
   if (!brewFormulaInstalled("portaudio")) {
-    defaultRuntime.log("Installing macOS audio build dependency: brew install portaudio");
+    runtime.log("Installing macOS audio build dependency: brew install portaudio");
     await runStreamingCommand("brew", ["install", "portaudio"]);
   }
   if (!brewFormulaInstalled("python@3.11")) {
-    defaultRuntime.log("Installing compatible wake-word Python: brew install python@3.11");
+    runtime.log("Installing compatible wake-word Python: brew install python@3.11");
     await runStreamingCommand("brew", ["install", "python@3.11"]);
   }
 }
@@ -1098,7 +1098,10 @@ function resolveVoiceSetupPython(explicitPython?: string): string | undefined {
   return firstWorkingPython(candidates);
 }
 
-async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
+export async function runVoiceSetup(
+  opts: VoiceSetupOptions,
+  runtime: RuntimeEnv = defaultRuntime,
+): Promise<void> {
   const wakeDir = detectWakeDir(opts.wakeDir);
   const requirementsPath = path.join(wakeDir, "requirements.txt");
   if (!(await fileExists(requirementsPath))) {
@@ -1106,7 +1109,7 @@ async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
   }
 
   if (!trimToUndefined(opts.python) && !trimToUndefined(process.env.VORA_PYTHON)) {
-    await ensureMacVoiceBuildDependencies();
+    await ensureMacVoiceBuildDependencies(runtime);
   }
   const basePython = resolveVoiceSetupPython(opts.python);
   if (!basePython) {
@@ -1126,12 +1129,12 @@ async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
     (!venvPythonWorks ||
       (existingDeps && !existingDeps.ok && !onlyMissingOpenWakeWordResources(existingDeps.missing)))
   ) {
-    defaultRuntime.log(`Recreating incomplete voice Python venv: ${venvDir}`);
+    runtime.log(`Recreating incomplete voice Python venv: ${venvDir}`);
     await fs.rm(venvDir, { recursive: true, force: true });
   }
   venvPython = resolveVenvPythonBin(venvDir);
   if (!commandSucceeds(venvPython, ["--version"])) {
-    defaultRuntime.log(`Creating voice Python venv: ${venvDir}`);
+    runtime.log(`Creating voice Python venv: ${venvDir}`);
     await runStreamingCommand(basePython, ["-m", "venv", venvDir]);
   }
   venvPython = resolveVenvPythonBin(venvDir);
@@ -1139,7 +1142,7 @@ async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
     throw new Error(`voice Python venv is unusable: ${venvDir}`);
   }
 
-  defaultRuntime.log(`Installing wake word dependencies into: ${venvDir}`);
+  runtime.log(`Installing wake word dependencies into: ${venvDir}`);
   await runStreamingCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"], wakeDir);
   await runStreamingCommand(venvPython, ["-m", "pip", "install", "-r", requirementsPath], wakeDir);
   await ensureOpenWakeWordResources(venvPython);
@@ -1148,8 +1151,8 @@ async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
   if (!deps.ok) {
     throw new Error(formatWakePythonDependencyError(venvPython, deps.message));
   }
-  defaultRuntime.log("Voice Python runtime ready.");
-  defaultRuntime.log(`Using: ${venvPython}`);
+  runtime.log("Voice Python runtime ready.");
+  runtime.log(`Using: ${venvPython}`);
 }
 
 function applyTemplate(raw: string, replacements: Record<string, string>): string {
@@ -1603,7 +1606,7 @@ export function registerVoiceCli(program: Command) {
     .option("--venv-dir <path>", "Voice Python venv directory")
     .action(async (opts: VoiceSetupOptions) => {
       try {
-        await runVoiceSetup(opts);
+        await runVoiceSetup(opts, defaultRuntime);
       } catch (err) {
         defaultRuntime.error(String(err));
         defaultRuntime.exit(1);

@@ -17,6 +17,7 @@ export const optionalBundledClusters = [
 export const optionalBundledClusterSet = new Set(optionalBundledClusters);
 
 export const OPTIONAL_BUNDLED_BUILD_ENV = "OPENCLAW_INCLUDE_OPTIONAL_BUNDLED";
+export const VORA_OPTIONAL_BUNDLED_BUILD_ENV = "VORA_INCLUDE_OPTIONAL_BUNDLED";
 
 export function isOptionalBundledCluster(cluster) {
   return optionalBundledClusterSet.has(cluster);
@@ -25,13 +26,14 @@ export function isOptionalBundledCluster(cluster) {
 export function shouldIncludeOptionalBundledClusters(env = process.env) {
   // Release artifacts should preserve the last shipped upgrade surface by
   // default. Specific size-sensitive lanes can still opt out explicitly.
-  return env[OPTIONAL_BUNDLED_BUILD_ENV] !== "0";
+  return env[VORA_OPTIONAL_BUNDLED_BUILD_ENV] !== "0" && env[OPTIONAL_BUNDLED_BUILD_ENV] !== "0";
 }
 
 export function hasReleasedBundledInstall(packageJson) {
+  const pluginConfig = packageJson?.vora ?? packageJson?.openclaw;
   return (
-    typeof packageJson?.openclaw?.install?.npmSpec === "string" &&
-    packageJson.openclaw.install.npmSpec.trim().length > 0
+    typeof pluginConfig?.install?.npmSpec === "string" &&
+    pluginConfig.install.npmSpec.trim().length > 0
   );
 }
 
