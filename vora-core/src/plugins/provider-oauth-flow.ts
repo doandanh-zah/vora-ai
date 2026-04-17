@@ -35,8 +35,18 @@ export function createVpsAwareOAuthHandlers(params: {
       }
 
       params.spin.update(params.localBrowserMessage);
-      await params.openUrl(url);
-      params.runtime.log(`Open: ${url}`);
+      params.runtime.log(`\nOpen this URL if your browser did not open:\n\n${url}\n`);
+      void Promise.resolve(params.openUrl(url))
+        .then((opened) => {
+          if (opened === false) {
+            params.runtime.log("Browser auto-open failed. Copy/paste the URL above into your browser.");
+          }
+        })
+        .catch((error) => {
+          params.runtime.log(
+            `Browser auto-open failed. Copy/paste the URL above into your browser. (${String(error)})`,
+          );
+        });
     },
     onPrompt: async (prompt) => {
       if (manualCodePromise) {

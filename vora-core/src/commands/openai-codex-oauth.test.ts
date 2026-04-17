@@ -109,7 +109,7 @@ describe("loginOpenAICodexOAuth", () => {
       "https://auth.openai.com/oauth/authorize?scope=openid+profile+email+offline_access&state=abc",
     );
     expect(runtime.log).toHaveBeenCalledWith(
-      "Open: https://auth.openai.com/oauth/authorize?scope=openid+profile+email+offline_access&state=abc",
+      "\nOpen this URL if your browser did not open:\n\nhttps://auth.openai.com/oauth/authorize?scope=openid+profile+email+offline_access&state=abc\n",
     );
   });
 

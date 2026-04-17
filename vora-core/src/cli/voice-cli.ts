@@ -43,6 +43,10 @@ type VoiceDoctorOptions = Omit<VoiceRootOptions, "deliver" | "thinking" | "once"
   json?: boolean;
 };
 
+type VoiceSetupOptions = Pick<VoiceRootOptions, "wakeDir" | "python"> & {
+  venvDir?: string;
+};
+
 type VoiceRuntimeOptions = {
   gateway: {
     url?: string;
@@ -102,6 +106,8 @@ const DEFAULT_STT_TIMEOUT_MS = 25_000;
 const DEFAULT_STT_LANGUAGE = "vi-VN";
 const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
 const DEFAULT_VOICE_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
+const WAKE_PYTHON_MODULES = ["openwakeword", "pyaudio", "numpy"] as const;
+const WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS = 60_000;
 
 function resolveBundledAgoraBridgeScriptPath(): string {
   const candidates = [
@@ -133,6 +139,30 @@ function trimToUndefined(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveVoiceVenvDir(explicitVenvDir?: string): string {
+  return (
+    trimToUndefined(explicitVenvDir) ??
+    trimToUndefined(process.env.VORA_VOICE_PYTHON_VENV) ??
+    path.join(os.homedir(), ".vora", "voice-python")
+  );
+}
+
+function resolveVenvPythonCandidates(venvDir = resolveVoiceVenvDir()): string[] {
+  if (process.platform === "win32") {
+    return [path.join(venvDir, "Scripts", "python.exe")];
+  }
+  return [
+    path.join(venvDir, "bin", "python"),
+    path.join(venvDir, "bin", "python3"),
+    path.join(venvDir, "bin", "python3.11"),
+  ];
+}
+
+function resolveVenvPythonBin(venvDir = resolveVoiceVenvDir()): string {
+  const candidates = resolveVenvPythonCandidates(venvDir);
+  return candidates.find((candidate) => commandSucceeds(candidate, ["--version"])) ?? candidates[0]!;
 }
 
 function resolveVoiceBackendUrl(explicitBackendUrl?: string): string | undefined {
@@ -189,9 +219,11 @@ function parseTtsProvider(
 }
 
 function detectPythonBinary(explicitPython?: string): string | null {
+  const venvPython = resolveVenvPythonBin();
   const candidates = [
     trimToUndefined(explicitPython),
     trimToUndefined(process.env.VORA_PYTHON),
+    existsSync(venvPython) ? venvPython : undefined,
     "python3",
     "python",
   ].filter((value): value is string => Boolean(value));
@@ -211,13 +243,103 @@ function detectPythonBinary(explicitPython?: string): string | null {
   return null;
 }
 
+function checkWakePythonDependencies(pythonBin: string): {
+  ok: boolean;
+  missing: string[];
+  message: string;
+} {
+  if (!pythonBin) {
+    return {
+      ok: false,
+      missing: [...WAKE_PYTHON_MODULES],
+      message: "python3/python not found",
+    };
+  }
+  const script = [
+    "import importlib, json, pathlib, sys",
+    "missing=[]",
+    `mods=${JSON.stringify(WAKE_PYTHON_MODULES)}`,
+    "for m in mods:",
+    "    try:",
+    "        importlib.import_module(m)",
+    "    except Exception as e:",
+    "        missing.append(f'{m} ({type(e).__name__}: {e})')",
+    "try:",
+    "    import openwakeword",
+    "    resource_dir = pathlib.Path(openwakeword.__file__).parent / 'resources' / 'models'",
+    "    for name in ('melspectrogram.onnx', 'embedding_model.onnx'):",
+    "        if not (resource_dir / name).exists():",
+    "            missing.append(f'openwakeword resource {name}')",
+    "except Exception as e:",
+    "    missing.append(f'openwakeword resources ({type(e).__name__}: {e})')",
+    "print(json.dumps(missing))",
+    "sys.exit(1 if missing else 0)",
+  ].join("\n");
+  try {
+    const result = spawnSync(pythonBin, ["-c", script], {
+      encoding: "utf8",
+      timeout: WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS,
+      shell: process.platform === "win32",
+    });
+    const raw = String(result.stdout ?? "").trim();
+    let missing: string[] = [];
+    try {
+      const parsed = raw ? JSON.parse(raw) : [];
+      missing = Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
+    } catch {
+      missing = result.status === 0 ? [] : [...WAKE_PYTHON_MODULES];
+    }
+    if (result.status === 0 && missing.length === 0) {
+      return { ok: true, missing: [], message: "installed" };
+    }
+    const stderr = String(result.stderr ?? "").trim();
+    const spawnError = result.error as (Error & { code?: string }) | undefined;
+    const timedOut = spawnError?.code === "ETIMEDOUT" || result.signal === "SIGTERM";
+    return {
+      ok: false,
+      missing: missing.length > 0 ? missing : [...WAKE_PYTHON_MODULES],
+      message:
+        missing.length > 0
+          ? `missing ${missing.join(", ")}`
+          : timedOut
+            ? `dependency probe timed out after ${String(WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS)}ms`
+          : stderr || `dependency probe failed with exit ${String(result.status)}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      missing: [...WAKE_PYTHON_MODULES],
+      message: String(error),
+    };
+  }
+}
+
+function formatWakePythonDependencyError(pythonBin: string, message: string): string {
+  return [
+    `wake word Python dependencies are not ready for ${pythonBin}: ${message}`,
+    "Run: vora voice setup",
+    "Then re-check: vora voice doctor --json",
+  ].join("\n");
+}
+
+function onlyMissingOpenWakeWordResources(missing: string[]): boolean {
+  return (
+    missing.length > 0 &&
+    missing.every((entry) => entry.startsWith("openwakeword resource "))
+  );
+}
+
 function detectWakeDir(explicitWakeDir?: string): string {
   const fromEnv = trimToUndefined(process.env.VORA_WAKE_WORD_DIR);
   const fromOpt = trimToUndefined(explicitWakeDir);
+  const packagedWake = path.resolve(import.meta.dirname, "..", "assets", "wake_word");
+  const sourceBundledWake = path.resolve(import.meta.dirname, "..", "..", "assets", "wake_word");
   const repoRelativeWake = path.resolve(import.meta.dirname, "..", "..", "..", "wake_word");
   const candidates = [
     fromOpt,
     fromEnv,
+    packagedWake,
+    sourceBundledWake,
     path.resolve(process.cwd(), "wake_word"),
     path.resolve(process.cwd(), "..", "wake_word"),
     repoRelativeWake,
@@ -401,6 +523,13 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
       resolved.wake.pythonBin.length > 0
         ? `using ${resolved.wake.pythonBin}`
         : "python3/python not found",
+  });
+  const wakeDeps = checkWakePythonDependencies(resolved.wake.pythonBin);
+  checks.push({
+    key: "wake_python_deps",
+    label: "wake Python deps",
+    ok: wakeDeps.ok,
+    message: wakeDeps.ok ? wakeDeps.message : `${wakeDeps.message}; run: vora voice setup`,
   });
 
   const gatewayOk = await checkGatewayReachable(resolved);
@@ -864,6 +993,165 @@ async function runShellCommand(command: string, timeoutMs: number): Promise<{
   return await Promise.race([done, timeout]);
 }
 
+async function runStreamingCommand(bin: string, args: string[], cwd?: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(bin, args, {
+      cwd,
+      stdio: "inherit",
+      shell: process.platform === "win32",
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${bin} ${args.join(" ")} failed with exit ${String(code)}`));
+    });
+  });
+}
+
+async function ensureOpenWakeWordResources(pythonBin: string): Promise<void> {
+  const script = [
+    "from openwakeword.utils import download_models",
+    "# Custom VORA wake-word models still need openWakeWord feature models.",
+    "download_models(model_names=['vora_custom_model'])",
+  ].join("\n");
+  defaultRuntime.log("Preparing openWakeWord runtime models.");
+  await runStreamingCommand(pythonBin, ["-c", script]);
+}
+
+function commandSucceeds(bin: string, args: string[]): boolean {
+  try {
+    return (
+      spawnSync(bin, args, {
+        stdio: "ignore",
+        shell: process.platform === "win32",
+      }).status === 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function firstWorkingPython(candidates: string[]): string | undefined {
+  for (const candidate of candidates) {
+    if (commandSucceeds(candidate, ["--version"])) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function brewFormulaPython(formula: string, executable: string): string | undefined {
+  if (!brewFormulaInstalled(formula)) {
+    return undefined;
+  }
+  const result = spawnSync("brew", ["--prefix", formula], {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  const prefix = String(result.stdout ?? "").trim();
+  return prefix ? path.join(prefix, "bin", executable) : undefined;
+}
+
+function brewFormulaInstalled(formula: string): boolean {
+  const result = spawnSync("brew", ["list", "--versions", formula], {
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  return result.status === 0 && String(result.stdout ?? "").trim().length > 0;
+}
+
+async function ensureMacVoiceBuildDependencies(): Promise<void> {
+  if (process.platform !== "darwin" || !commandSucceeds("brew", ["--version"])) {
+    return;
+  }
+  if (!brewFormulaInstalled("portaudio")) {
+    defaultRuntime.log("Installing macOS audio build dependency: brew install portaudio");
+    await runStreamingCommand("brew", ["install", "portaudio"]);
+  }
+  if (!brewFormulaInstalled("python@3.11")) {
+    defaultRuntime.log("Installing compatible wake-word Python: brew install python@3.11");
+    await runStreamingCommand("brew", ["install", "python@3.11"]);
+  }
+}
+
+function resolveVoiceSetupPython(explicitPython?: string): string | undefined {
+  const explicit = trimToUndefined(explicitPython) ?? trimToUndefined(process.env.VORA_PYTHON);
+  if (explicit) {
+    return explicit;
+  }
+  const macPython311 = brewFormulaPython("python@3.11", "python3.11");
+  const candidates = [
+    macPython311,
+    "/opt/homebrew/opt/python@3.11/bin/python3.11",
+    "/usr/local/opt/python@3.11/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3",
+    "python3",
+    "python",
+  ].filter((entry): entry is string => Boolean(entry));
+  return firstWorkingPython(candidates);
+}
+
+async function runVoiceSetup(opts: VoiceSetupOptions): Promise<void> {
+  const wakeDir = detectWakeDir(opts.wakeDir);
+  const requirementsPath = path.join(wakeDir, "requirements.txt");
+  if (!(await fileExists(requirementsPath))) {
+    throw new Error(`wake requirements not found: ${requirementsPath}`);
+  }
+
+  if (!trimToUndefined(opts.python) && !trimToUndefined(process.env.VORA_PYTHON)) {
+    await ensureMacVoiceBuildDependencies();
+  }
+  const basePython = resolveVoiceSetupPython(opts.python);
+  if (!basePython) {
+    throw new Error("python runtime missing. Install python3, then run `vora voice setup` again.");
+  }
+
+  const venvDir = resolveVoiceVenvDir(opts.venvDir);
+  await fs.mkdir(path.dirname(venvDir), { recursive: true });
+  let venvPython = resolveVenvPythonBin(venvDir);
+  const venvExists = existsSync(venvDir);
+  const venvPythonWorks = commandSucceeds(venvPython, ["--version"]);
+  const existingDeps = venvPythonWorks
+    ? checkWakePythonDependencies(venvPython)
+    : undefined;
+  if (
+    venvExists &&
+    (!venvPythonWorks ||
+      (existingDeps && !existingDeps.ok && !onlyMissingOpenWakeWordResources(existingDeps.missing)))
+  ) {
+    defaultRuntime.log(`Recreating incomplete voice Python venv: ${venvDir}`);
+    await fs.rm(venvDir, { recursive: true, force: true });
+  }
+  venvPython = resolveVenvPythonBin(venvDir);
+  if (!commandSucceeds(venvPython, ["--version"])) {
+    defaultRuntime.log(`Creating voice Python venv: ${venvDir}`);
+    await runStreamingCommand(basePython, ["-m", "venv", venvDir]);
+  }
+  venvPython = resolveVenvPythonBin(venvDir);
+  if (!commandSucceeds(venvPython, ["--version"])) {
+    throw new Error(`voice Python venv is unusable: ${venvDir}`);
+  }
+
+  defaultRuntime.log(`Installing wake word dependencies into: ${venvDir}`);
+  await runStreamingCommand(venvPython, ["-m", "pip", "install", "--upgrade", "pip"], wakeDir);
+  await runStreamingCommand(venvPython, ["-m", "pip", "install", "-r", requirementsPath], wakeDir);
+  await ensureOpenWakeWordResources(venvPython);
+
+  const deps = checkWakePythonDependencies(venvPython);
+  if (!deps.ok) {
+    throw new Error(formatWakePythonDependencyError(venvPython, deps.message));
+  }
+  defaultRuntime.log("Voice Python runtime ready.");
+  defaultRuntime.log(`Using: ${venvPython}`);
+}
+
 function applyTemplate(raw: string, replacements: Record<string, string>): string {
   let output = raw;
   for (const [key, value] of Object.entries(replacements)) {
@@ -1121,6 +1409,10 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
   if (!(await fileExists(resolved.wake.modelPath))) {
     throw new Error(`wake model not found: ${resolved.wake.modelPath}`);
   }
+  const wakeDeps = checkWakePythonDependencies(resolved.wake.pythonBin);
+  if (!wakeDeps.ok) {
+    throw new Error(formatWakePythonDependencyError(resolved.wake.pythonBin, wakeDeps.message));
+  }
   if (resolved.stt.provider === "agora" && !resolved.stt.agoraCommand) {
     throw new Error(
       "Agora STT provider needs a bridge command. Use --agora-stt-command or VORA_AGORA_STT_COMMAND.",
@@ -1302,6 +1594,21 @@ export function registerVoiceCli(program: Command) {
       defaultRuntime.exit(1);
     }
   });
+
+  voice
+    .command("setup")
+    .description("Install wake-word Python dependencies into an isolated VORA venv")
+    .option("--wake-dir <path>", "Path to wake_word directory")
+    .option("--python <bin>", "Base Python binary used to create the venv")
+    .option("--venv-dir <path>", "Voice Python venv directory")
+    .action(async (opts: VoiceSetupOptions) => {
+      try {
+        await runVoiceSetup(opts);
+      } catch (err) {
+        defaultRuntime.error(String(err));
+        defaultRuntime.exit(1);
+      }
+    });
 
   addVoiceOptions(
     voice
