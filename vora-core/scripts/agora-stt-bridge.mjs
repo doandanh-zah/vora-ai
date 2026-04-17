@@ -6,13 +6,16 @@ import http from "node:http";
 
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_API_BASE = "https://api.agora.io";
+const DEFAULT_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
 const DEFAULT_LANGUAGE = "vi-VN";
 const DEFAULT_RTC_UID = "1002";
-const DEFAULT_STT_BOT_UID = "9001";
+const DEFAULT_STT_AUDIO_UID = "111";
+const DEFAULT_STT_TEXT_UID = "222";
+const DEFAULT_STT_BOT_UID = DEFAULT_STT_AUDIO_UID;
 
 function printUsage() {
   const lines = [
-    "Agora STT bridge (browser + RTC + Agora STT v7) for `vora voice`",
+    "Agora STT bridge (browser + RTC + Agora RTT) for `vora voice`",
     "",
     "Usage:",
     "  node scripts/agora-stt-bridge.mjs [options]",
@@ -23,8 +26,11 @@ function printUsage() {
     "  --channel <name>       RTC channel name",
     "  --uid <uid>            Browser RTC UID (default: 1002)",
     "  --rtc-token <token>    RTC token for browser + STT bot",
-    "  --stt-bot-uid <uid>    STT bot UID for Agora STT service",
+    "  --stt-audio-uid <uid>  STT audio bot UID for Agora RTT service",
+    "  --stt-text-uid <uid>   STT text bot UID for Agora RTT data stream",
+    "  --stt-bot-uid <uid>    Legacy alias for --stt-audio-uid",
     "  --api-base <url>       Agora API base (default: https://api.agora.io)",
+    "  --backend-url <url>    VORA backend URL for provider secrets/tokens",
     "  --app-id <id>          Agora App ID (or VORA_AGORA_APP_ID)",
     "  --customer-key <key>   Agora customer key (or VORA_AGORA_CUSTOMER_KEY)",
     "  --customer-secret <s>  Agora customer secret (or VORA_AGORA_CUSTOMER_SECRET)",
@@ -33,8 +39,10 @@ function printUsage() {
     "  --help                 Show this help",
     "",
     "Environment fallbacks:",
+    "  VORA_BACKEND_URL",
     "  VORA_AGORA_APP_ID, VORA_AGORA_CUSTOMER_KEY, VORA_AGORA_CUSTOMER_SECRET",
-    "  VORA_AGORA_CHANNEL, VORA_AGORA_UID, VORA_AGORA_RTC_TOKEN, VORA_AGORA_STT_BOT_UID",
+    "  VORA_AGORA_CHANNEL, VORA_AGORA_UID, VORA_AGORA_RTC_TOKEN",
+    "  VORA_AGORA_STT_AUDIO_UID, VORA_AGORA_STT_TEXT_UID, VORA_AGORA_STT_BOT_UID",
     "  VORA_AGORA_API_BASE, VORA_AGORA_STT_TIMEOUT_MS, VORA_AGORA_STT_LANG",
   ];
   process.stderr.write(`${lines.join("\n")}\n`);
@@ -112,6 +120,10 @@ function safeBase(base) {
   return base.replace(/\/+$/g, "");
 }
 
+function optionalText(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
+}
+
 function openUrl(url) {
   const platform = process.platform;
   try {
@@ -178,6 +190,70 @@ function readJsonBody(req) {
     });
     req.on("error", reject);
   });
+}
+
+async function backendJsonRequest(backendUrl, path, body) {
+  const response = await fetch(`${safeBase(backendUrl)}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const bodyText = await response.text();
+  let payload = {};
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    payload = { error: bodyText };
+  }
+  if (!response.ok) {
+    const detail =
+      typeof payload?.error === "string"
+        ? payload.error
+        : typeof payload?.message === "string"
+          ? payload.message
+          : bodyText;
+    throw new Error(`backend ${path} failed (${response.status}): ${detail || "unknown error"}`);
+  }
+  return payload;
+}
+
+async function resolveBackendAgoraSession(config) {
+  if (!config.backendUrl) {
+    return config;
+  }
+  const session = await backendJsonRequest(config.backendUrl, "/api/agora/token", {
+    channel: config.channel || undefined,
+    uid: config.uid || DEFAULT_RTC_UID,
+    sttAudioUid: config.sttAudioUid || config.sttBotUid || DEFAULT_STT_AUDIO_UID,
+    sttTextUid: config.sttTextUid || DEFAULT_STT_TEXT_UID,
+    sttBotUid: config.sttBotUid || config.sttAudioUid || DEFAULT_STT_BOT_UID,
+    lang: config.lang,
+    timeoutMs: config.timeoutMs,
+  });
+  return {
+    ...config,
+    appId: ensureRequired(optionalText(session.appId), "backend /api/agora/token appId"),
+    channel: ensureRequired(optionalText(session.channel), "backend /api/agora/token channel"),
+    uid: optionalText(session.uid) || config.uid || DEFAULT_RTC_UID,
+    sttAudioUid:
+      optionalText(session.sttAudioUid) ||
+      optionalText(session.sttBotUid) ||
+      config.sttAudioUid ||
+      config.sttBotUid ||
+      DEFAULT_STT_AUDIO_UID,
+    sttTextUid: optionalText(session.sttTextUid) || config.sttTextUid || DEFAULT_STT_TEXT_UID,
+    sttBotUid:
+      optionalText(session.sttBotUid) ||
+      optionalText(session.sttAudioUid) ||
+      config.sttBotUid ||
+      config.sttAudioUid ||
+      DEFAULT_STT_BOT_UID,
+    rtcToken: optionalText(session.rtcToken),
+    lang: optionalText(session.lang) || config.lang,
+    timeoutMs: Number.isFinite(Number(session.timeoutMs)) ? Number(session.timeoutMs) : config.timeoutMs,
+  };
 }
 
 function buildBrowserHtml(browserConfig) {
@@ -434,8 +510,12 @@ function buildBrowserHtml(browserConfig) {
           TextMessage = root.lookupType("agora.audio2text.Text");
 
           setStatus("Joining RTC channel...");
-          client = AgoraRTC.createClient({ mode: "live", codec: "vp8", role: "host" });
-          client.on("stream-message", (_uid, data) => {
+          client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+          if (typeof client.setClientRole === "function") {
+            await client.setClientRole("host");
+          }
+          client.on("stream-message", (...args) => {
+            const data = args[args.length - 1];
             void handleStreamMessage(data);
           });
 
@@ -474,6 +554,21 @@ function buildBrowserHtml(browserConfig) {
 }
 
 async function startAgoraStt(config, lang) {
+  if (config.backendUrl) {
+    const payload = await backendJsonRequest(config.backendUrl, "/api/agora/stt/start", {
+      channel: config.channel,
+      uid: config.uid,
+      sttAudioUid: config.sttAudioUid,
+      sttTextUid: config.sttTextUid,
+      sttBotUid: config.sttBotUid,
+      lang,
+      timeoutMs: config.timeoutMs,
+    });
+    if (!payload?.agentId) {
+      throw new Error("backend /api/agora/stt/start returned no agentId");
+    }
+    return String(payload.agentId);
+  }
   const apiBase = safeBase(config.apiBase);
   const auth = Buffer.from(`${config.customerKey}:${config.customerSecret}`).toString("base64");
   const startPayload = {
@@ -524,6 +619,10 @@ async function stopAgoraStt(config, agentId) {
   if (!agentId) {
     return;
   }
+  if (config.backendUrl) {
+    await backendJsonRequest(config.backendUrl, "/api/agora/stt/stop", { agentId }).catch(() => undefined);
+    return;
+  }
   const apiBase = safeBase(config.apiBase);
   const auth = Buffer.from(`${config.customerKey}:${config.customerSecret}`).toString("base64");
   await fetch(
@@ -562,19 +661,16 @@ async function main() {
   }
 
   const config = {
-    appId: ensureRequired(readText(args["app-id"], "VORA_AGORA_APP_ID"), "VORA_AGORA_APP_ID / --app-id"),
-    customerKey: ensureRequired(
-      readText(args["customer-key"], "VORA_AGORA_CUSTOMER_KEY"),
-      "VORA_AGORA_CUSTOMER_KEY / --customer-key",
-    ),
-    customerSecret: ensureRequired(
-      readText(args["customer-secret"], "VORA_AGORA_CUSTOMER_SECRET"),
-      "VORA_AGORA_CUSTOMER_SECRET / --customer-secret",
-    ),
+    backendUrl: readText(args["backend-url"], "VORA_BACKEND_URL", DEFAULT_BACKEND_URL),
+    appId: readText(args["app-id"], "VORA_AGORA_APP_ID"),
+    customerKey: readText(args["customer-key"], "VORA_AGORA_CUSTOMER_KEY"),
+    customerSecret: readText(args["customer-secret"], "VORA_AGORA_CUSTOMER_SECRET"),
     channel:
       readText(args.channel, "VORA_AGORA_CHANNEL") ||
       `vora-voice-${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 6)}`,
     uid: readText(args.uid, "VORA_AGORA_UID", DEFAULT_RTC_UID),
+    sttAudioUid: readText(args["stt-audio-uid"], "VORA_AGORA_STT_AUDIO_UID"),
+    sttTextUid: readText(args["stt-text-uid"], "VORA_AGORA_STT_TEXT_UID"),
     sttBotUid: readText(args["stt-bot-uid"], "VORA_AGORA_STT_BOT_UID", DEFAULT_STT_BOT_UID),
     rtcToken: readText(args["rtc-token"], "VORA_AGORA_RTC_TOKEN"),
     apiBase: readText(args["api-base"], "VORA_AGORA_API_BASE", DEFAULT_API_BASE),
@@ -584,13 +680,24 @@ async function main() {
     port: readPositiveInt(args.port, "VORA_AGORA_STT_PORT", 0),
   };
 
+  if (!config.backendUrl) {
+    config.appId = ensureRequired(config.appId, "VORA_AGORA_APP_ID / --app-id");
+    config.customerKey = ensureRequired(config.customerKey, "VORA_AGORA_CUSTOMER_KEY / --customer-key");
+    config.customerSecret = ensureRequired(
+      config.customerSecret,
+      "VORA_AGORA_CUSTOMER_SECRET / --customer-secret",
+    );
+  }
+
+  const resolvedConfig = await resolveBackendAgoraSession(config);
+
   const browserConfig = {
-    appId: config.appId,
-    channel: config.channel,
-    uid: config.uid,
-    rtcToken: config.rtcToken,
-    lang: config.lang,
-    timeoutMs: config.timeoutMs,
+    appId: resolvedConfig.appId,
+    channel: resolvedConfig.channel,
+    uid: resolvedConfig.uid,
+    rtcToken: resolvedConfig.rtcToken,
+    lang: resolvedConfig.lang,
+    timeoutMs: resolvedConfig.timeoutMs,
   };
 
   let server;
@@ -602,7 +709,7 @@ async function main() {
       return;
     }
     done = true;
-    await stopAgoraStt(config, currentAgentId).catch(() => undefined);
+    await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
     if (server) {
       await closeServer(server);
     }
@@ -615,7 +722,7 @@ async function main() {
       return;
     }
     done = true;
-    await stopAgoraStt(config, currentAgentId).catch(() => undefined);
+    await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
     if (server) {
       await closeServer(server);
     }
@@ -635,8 +742,8 @@ async function main() {
     if (req.method === "POST" && pathname === "/api/start") {
       try {
         const body = await readJsonBody(req);
-        const lang = typeof body?.lang === "string" && body.lang.trim() ? body.lang.trim() : config.lang;
-        currentAgentId = await startAgoraStt(config, lang);
+        const lang = typeof body?.lang === "string" && body.lang.trim() ? body.lang.trim() : resolvedConfig.lang;
+        currentAgentId = await startAgoraStt(resolvedConfig, lang);
         jsonResponse(res, 200, { ok: true, agentId: currentAgentId });
       } catch (error) {
         jsonResponse(res, 500, { ok: false, error: String(error) });
@@ -651,7 +758,7 @@ async function main() {
           typeof body?.agentId === "string" && body.agentId.trim().length > 0
             ? body.agentId.trim()
             : currentAgentId;
-        await stopAgoraStt(config, agentId);
+        await stopAgoraStt(resolvedConfig, agentId);
         if (agentId === currentAgentId) {
           currentAgentId = "";
         }
@@ -710,7 +817,8 @@ async function main() {
   }
 
   const localUrl = `http://127.0.0.1:${address.port}/`;
-  process.stderr.write(`[agora-stt-bridge] channel=${config.channel} uid=${config.uid}\n`);
+  const source = resolvedConfig.backendUrl ? `backend=${safeBase(resolvedConfig.backendUrl)}` : "direct-agora";
+  process.stderr.write(`[agora-stt-bridge] channel=${resolvedConfig.channel} uid=${resolvedConfig.uid} ${source}\n`);
   process.stderr.write(`[agora-stt-bridge] open this URL if browser does not auto-open:\n${localUrl}\n`);
   process.stderr.write("[agora-stt-bridge] waiting for one final transcript...\n");
   if (config.open) {
@@ -718,8 +826,8 @@ async function main() {
   }
 
   const timeout = setTimeout(() => {
-    void fail(`timeout after ${config.timeoutMs}ms`);
-  }, config.timeoutMs + 15_000);
+    void fail(`timeout after ${resolvedConfig.timeoutMs}ms`);
+  }, resolvedConfig.timeoutMs + 15_000);
 
   const stop = async () => {
     clearTimeout(timeout);

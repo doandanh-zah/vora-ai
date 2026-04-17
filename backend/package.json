@@ -12,6 +12,7 @@
   "dependencies": {
     "@solana/web3.js": "^1.98.2",
     "agora-access-token": "^2.0.4",
+    "agora-token": "^2.0.5",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

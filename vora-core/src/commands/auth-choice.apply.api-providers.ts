@@ -25,6 +25,7 @@ import type { AuthChoice } from "./onboard-types.js";
 
 function checkOllamaInstalled(): boolean {
   try {
+    const result = spawnSync("ollama", ["--version"], {
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -72,9 +73,11 @@ async function tryStartOllamaServeInBackground(params: {
           [
             "-NoProfile",
             "-Command",
+            "Start-Process -WindowStyle Hidden ollama -ArgumentList 'serve'",
           ],
           { encoding: "utf8", stdio: "pipe" },
         )
+      : spawnSync("sh", ["-lc", "nohup ollama serve >/tmp/vora-ollama.log 2>&1 &"], {
           encoding: "utf8",
           stdio: "pipe",
         });
@@ -147,6 +150,7 @@ async function autoInstallOllama(
         "powershell",
         [
           "-Command",
+          "Start-Process 'https://ollama.com/download/windows'",
         ],
         {
           encoding: "utf8",
@@ -157,11 +161,11 @@ async function autoInstallOllama(
     } else {
       // Unix/Linux installation
       installResult = spawnSync(
-        "curl",
+        "sh",
+        ["-lc", "curl -fsSL https://ollama.ai/install.sh | sh"],
         {
           encoding: "utf8",
           stdio: "pipe",
-          shell: true,
         },
       );
     }
@@ -189,6 +193,8 @@ async function autoInstallOllama(
         "",
         "Please install manually:",
         isWindows
+          ? "https://ollama.com/download/windows"
+          : "curl -fsSL https://ollama.ai/install.sh | sh",
         "",
         `Error: ${error instanceof Error ? error.message : String(error)}`,
       ].join("\n"),
@@ -221,6 +227,7 @@ async function autoPullModel(
   );
 
   try {
+    const pullResult = spawnSync("ollama", ["pull", modelId], {
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -263,6 +270,7 @@ type OllamaTagsResponse = {
 
 export function normalizeOllamaBaseUrl(raw: string | undefined): string {
   const trimmed = String(raw ?? "").trim();
+  const candidate = trimmed || "http://127.0.0.1:11434";
   const normalized = candidate.replace(/\/+$/u, "");
   if (normalized.endsWith("/v1")) {
     return normalized.slice(0, -3);
@@ -330,6 +338,7 @@ export function mergeOllamaProviderConfig(params: {
   baseUrl: string;
   modelId: string;
 }): ApplyAuthChoiceParams["config"] {
+  const existingProvider = params.config.models?.providers?.ollama as
     | ModelProviderConfig
     | undefined;
   const modelDefinition = buildOllamaModelDefinition(params.modelId);
@@ -349,8 +358,10 @@ export function mergeOllamaProviderConfig(params: {
       ...params.config.models,
       providers: {
         ...params.config.models?.providers,
+        ollama: {
           ...existingProvider,
           baseUrl: params.baseUrl,
+          api: "ollama",
           models: nextModels,
         },
       },

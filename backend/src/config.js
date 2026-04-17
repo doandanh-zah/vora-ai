@@ -67,9 +67,14 @@ export const config = {
   agora: {
     appId: readText("AGORA_APP_ID", ""),
     appCertificate: readText("AGORA_APP_CERTIFICATE", ""),
+    customerKey: readText("AGORA_CUSTOMER_KEY", ""),
+    customerSecret: readText("AGORA_CUSTOMER_SECRET", ""),
+    apiBase: readText("AGORA_API_BASE", "https://api.agora.io"),
+    tokenExpireSeconds: readInt("AGORA_TOKEN_EXPIRE_SECONDS", 3600),
   },
   hume: {
-    apiKey: readText("HUME_API_KEY", ""),
+    apiKey: readText("HUME_API_KEY", readText("VORA_HUME_API_KEY", "")),
     secretKey: readText("HUME_SECRET_KEY", ""),
+    voiceId: readText("HUME_VOICE_ID", "9e068547-5ba4-4c8e-8e03-69282a008f04"),
   },
 };

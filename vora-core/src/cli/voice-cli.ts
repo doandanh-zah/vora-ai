@@ -33,6 +33,7 @@ type VoiceRootOptions = {
   sttLang?: string;
   sttTimeoutMs?: string;
   agoraSttCommand?: string;
+  backendUrl?: string;
   ttsProvider?: string;
   humeApiKey?: string;
   humeVoiceId?: string;
@@ -60,6 +61,7 @@ type VoiceRuntimeOptions = {
     threshold: number;
     pythonBin: string;
   };
+  backendUrl?: string;
   stt: {
     provider: VoiceSttProvider;
     language: string;
@@ -69,6 +71,7 @@ type VoiceRuntimeOptions = {
   };
   tts: {
     provider: VoiceTtsProvider;
+    backendUrl?: string;
     humeApiKey?: string;
     humeVoiceId: string;
   };
@@ -98,18 +101,30 @@ const DEFAULT_WAIT_MS = 40_000;
 const DEFAULT_STT_TIMEOUT_MS = 25_000;
 const DEFAULT_STT_LANGUAGE = "vi-VN";
 const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
+const DEFAULT_VOICE_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
 
 function resolveBundledAgoraBridgeScriptPath(): string {
-  return path.resolve(import.meta.dirname, "..", "..", "scripts", "agora-stt-bridge.mjs");
+  const candidates = [
+    path.resolve(import.meta.dirname, "..", "scripts", "agora-stt-bridge.mjs"),
+    path.resolve(import.meta.dirname, "..", "..", "scripts", "agora-stt-bridge.mjs"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }
 
-function buildBundledAgoraBridgeCommand(): string | undefined {
+function quoteShell(value: string): string {
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+function buildBundledAgoraBridgeCommand(backendUrl?: string): string | undefined {
   const scriptPath = resolveBundledAgoraBridgeScriptPath();
   if (!existsSync(scriptPath)) {
     return undefined;
   }
-  const escaped = scriptPath.replaceAll('"', '\\"');
-  return `node "${escaped}" --lang {lang} --timeout-ms {timeout_ms}`;
+  const parts = ["node", quoteShell(scriptPath), "--lang {lang}", "--timeout-ms {timeout_ms}"];
+  if (backendUrl) {
+    parts.push("--backend-url", quoteShell(backendUrl));
+  }
+  return parts.join(" ");
 }
 
 function trimToUndefined(value: unknown): string | undefined {
@@ -118,6 +133,18 @@ function trimToUndefined(value: unknown): string | undefined {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveVoiceBackendUrl(explicitBackendUrl?: string): string | undefined {
+  const raw =
+    trimToUndefined(explicitBackendUrl) ??
+    trimToUndefined(process.env.VORA_BACKEND_URL) ??
+    DEFAULT_VOICE_BACKEND_URL;
+  const value = raw.trim();
+  if (["0", "false", "none", "off", "local", "direct"].includes(value.toLowerCase())) {
+    return undefined;
+  }
+  return value.replace(/\/+$/g, "");
 }
 
 function parseThreshold(raw: unknown): number {
@@ -137,20 +164,28 @@ function parseMs(raw: unknown, fallback: number): number {
   return parsed && parsed > 0 ? parsed : fallback;
 }
 
-function parseSttProvider(raw: string | undefined, agoraCommand: string | undefined): VoiceSttProvider {
+function parseSttProvider(
+  raw: string | undefined,
+  agoraCommand: string | undefined,
+  backendUrl: string | undefined,
+): VoiceSttProvider {
   const value = raw?.trim().toLowerCase();
   if (value === "manual" || value === "agora") {
     return value;
   }
-  return agoraCommand ? "agora" : "manual";
+  return agoraCommand || backendUrl ? "agora" : "manual";
 }
 
-function parseTtsProvider(raw: string | undefined, humeApiKey: string | undefined): VoiceTtsProvider {
+function parseTtsProvider(
+  raw: string | undefined,
+  humeApiKey: string | undefined,
+  backendUrl: string | undefined,
+): VoiceTtsProvider {
   const value = raw?.trim().toLowerCase();
   if (value === "none" || value === "hume") {
     return value;
   }
-  return humeApiKey ? "hume" : "none";
+  return humeApiKey || backendUrl ? "hume" : "none";
 }
 
 function detectPythonBinary(explicitPython?: string): string | null {
@@ -199,18 +234,21 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
   const wakeDir = detectWakeDir(opts.wakeDir);
   const wakeModelName = trimToUndefined(opts.wakeModel) ?? DEFAULT_WAKE_MODEL_FILE;
   const pythonBin = detectPythonBinary(opts.python) ?? "";
+  const backendUrl = resolveVoiceBackendUrl(opts.backendUrl);
   const sttProviderRaw =
     trimToUndefined(opts.sttProvider) ?? trimToUndefined(process.env.VORA_VOICE_STT_PROVIDER);
   const explicitAgoraCommand =
     trimToUndefined(opts.agoraSttCommand) ?? trimToUndefined(process.env.VORA_AGORA_STT_COMMAND);
-  const sttProvider = parseSttProvider(sttProviderRaw, explicitAgoraCommand);
-  const bundledAgoraCommand = sttProvider === "agora" ? buildBundledAgoraBridgeCommand() : undefined;
+  const sttProvider = parseSttProvider(sttProviderRaw, explicitAgoraCommand, backendUrl);
+  const bundledAgoraCommand =
+    sttProvider === "agora" ? buildBundledAgoraBridgeCommand(backendUrl) : undefined;
   const agoraSttCommand = explicitAgoraCommand ?? bundledAgoraCommand;
   const humeApiKey =
     trimToUndefined(opts.humeApiKey) ?? trimToUndefined(process.env.VORA_HUME_API_KEY);
   const ttsProvider = parseTtsProvider(
     trimToUndefined(opts.ttsProvider) ?? trimToUndefined(process.env.VORA_VOICE_TTS_PROVIDER),
     humeApiKey,
+    backendUrl,
   );
 
   return {
@@ -224,6 +262,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       timeoutMs: parseTimeoutMs(opts.timeoutMs),
       waitMs: parseMs(opts.waitMs, DEFAULT_WAIT_MS),
     },
+    backendUrl,
     wake: {
       dir: wakeDir,
       scriptPath: path.join(wakeDir, "main.py"),
@@ -240,6 +279,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
     },
     tts: {
       provider: ttsProvider,
+      backendUrl,
       humeApiKey,
       humeVoiceId:
         trimToUndefined(opts.humeVoiceId) ??
@@ -255,9 +295,84 @@ function formatCheck(item: VoiceCheckItem): string {
   return `${icon} ${item.label}: ${item.message}`;
 }
 
+async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    const text = await response.text();
+    let payload: unknown = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { message: text };
+    }
+    if (!response.ok) {
+      const detail =
+        payload && typeof payload === "object" && "error" in payload
+          ? String((payload as { error?: unknown }).error ?? "")
+          : text;
+      throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+    }
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postJsonWithTimeout(url: string, body: unknown, timeoutMs: number): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    let payload: unknown = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { message: text };
+    }
+    if (!response.ok) {
+      const detail =
+        payload && typeof payload === "object" && "error" in payload
+          ? String((payload as { error?: unknown }).error ?? "")
+          : text;
+      throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+    }
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function backendProviderStatus(payload: unknown, provider: "agora" | "hume"): boolean | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const providers = (payload as { voiceProviders?: unknown }).voiceProviders;
+  if (!providers || typeof providers !== "object") {
+    return undefined;
+  }
+  const value = (providers as Record<string, unknown>)[provider];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 async function runVoiceDoctor(opts: VoiceDoctorOptions) {
   const resolved = resolveVoiceRuntimeOptions(opts);
   const checks: VoiceCheckItem[] = [];
+  let backendHealth: unknown;
+  let backendHealthOk = false;
 
   checks.push({
     key: "wake_dir",
@@ -291,6 +406,26 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
   const gatewayOk = await checkGatewayReachable(resolved);
   checks.push(gatewayOk);
 
+  if (resolved.backendUrl) {
+    try {
+      backendHealth = await fetchJsonWithTimeout(`${resolved.backendUrl}/health`, 5_000);
+      backendHealthOk = true;
+      checks.push({
+        key: "voice_backend",
+        label: "voice backend",
+        ok: true,
+        message: resolved.backendUrl,
+      });
+    } catch (error) {
+      checks.push({
+        key: "voice_backend",
+        label: "voice backend",
+        ok: false,
+        message: `${resolved.backendUrl}: ${String(error)}`,
+      });
+    }
+  }
+
   if (resolved.stt.provider === "agora") {
     checks.push({
       key: "stt_agora_command",
@@ -308,24 +443,85 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
         ok: await fileExists(bundledScriptPath),
         message: bundledScriptPath,
       });
-      checks.push({
-        key: "agora_app_id",
-        label: "Agora App ID",
-        ok: Boolean(trimToUndefined(process.env.VORA_AGORA_APP_ID)),
-        message: trimToUndefined(process.env.VORA_AGORA_APP_ID) ? "configured" : "missing",
-      });
-      checks.push({
-        key: "agora_customer_key",
-        label: "Agora customer key",
-        ok: Boolean(trimToUndefined(process.env.VORA_AGORA_CUSTOMER_KEY)),
-        message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_KEY) ? "configured" : "missing",
-      });
-      checks.push({
-        key: "agora_customer_secret",
-        label: "Agora customer secret",
-        ok: Boolean(trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET)),
-        message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET) ? "configured" : "missing",
-      });
+      if (resolved.backendUrl) {
+        const agoraReady = backendProviderStatus(backendHealth, "agora");
+        let tokenEndpointReady = false;
+        try {
+          await postJsonWithTimeout(
+            `${resolved.backendUrl}/api/agora/token`,
+            {
+              uid: "1002",
+              sttBotUid: "9001",
+              lang: resolved.stt.language,
+              timeoutMs: resolved.stt.timeoutMs,
+            },
+            5_000,
+          );
+          checks.push({
+            key: "backend_agora",
+            label: "backend Agora",
+            ok: true,
+            message: "token endpoint ready",
+          });
+          tokenEndpointReady = true;
+        } catch (error) {
+          checks.push({
+            key: "backend_agora",
+            label: "backend Agora",
+            ok: false,
+            message:
+              agoraReady === false
+                ? "backend is missing Agora env"
+                : `token endpoint failed: ${String(error)}`,
+          });
+        }
+        if (tokenEndpointReady) {
+          try {
+            await postJsonWithTimeout(
+              `${resolved.backendUrl}/api/agora/stt/probe`,
+              {
+                uid: "1002",
+                sttBotUid: "9001",
+                lang: resolved.stt.language,
+                timeoutMs: resolved.stt.timeoutMs,
+              },
+              8_000,
+            );
+            checks.push({
+              key: "backend_agora_stt",
+              label: "backend Agora STT",
+              ok: true,
+              message: "Real-Time Speech-to-Text 7.x route ready",
+            });
+          } catch (error) {
+            checks.push({
+              key: "backend_agora_stt",
+              label: "backend Agora STT",
+              ok: false,
+              message: `Real-Time Speech-to-Text route failed: ${String(error)}`,
+            });
+          }
+        }
+      } else {
+        checks.push({
+          key: "agora_app_id",
+          label: "Agora App ID",
+          ok: Boolean(trimToUndefined(process.env.VORA_AGORA_APP_ID)),
+          message: trimToUndefined(process.env.VORA_AGORA_APP_ID) ? "configured" : "missing",
+        });
+        checks.push({
+          key: "agora_customer_key",
+          label: "Agora customer key",
+          ok: Boolean(trimToUndefined(process.env.VORA_AGORA_CUSTOMER_KEY)),
+          message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_KEY) ? "configured" : "missing",
+        });
+        checks.push({
+          key: "agora_customer_secret",
+          label: "Agora customer secret",
+          ok: Boolean(trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET)),
+          message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET) ? "configured" : "missing",
+        });
+      }
       checks.push({
         key: "agora_channel",
         label: "Agora channel",
@@ -353,12 +549,27 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
   }
 
   if (resolved.tts.provider === "hume") {
-    checks.push({
-      key: "hume_api_key",
-      label: "Hume API key",
-      ok: Boolean(resolved.tts.humeApiKey),
-      message: resolved.tts.humeApiKey ? "configured" : "missing VORA_HUME_API_KEY",
-    });
+    if (resolved.tts.backendUrl) {
+      const humeReady = backendProviderStatus(backendHealth, "hume");
+      checks.push({
+        key: "backend_hume",
+        label: "backend Hume",
+        ok: backendHealthOk && humeReady === true,
+        message:
+          humeReady === true
+            ? "configured on backend"
+            : humeReady === false
+              ? "backend is missing Hume env"
+              : "backend health does not expose Hume status",
+      });
+    } else {
+      checks.push({
+        key: "hume_api_key",
+        label: "Hume API key",
+        ok: Boolean(resolved.tts.humeApiKey),
+        message: resolved.tts.humeApiKey ? "configured" : "missing VORA_HUME_API_KEY",
+      });
+    }
     checks.push({
       key: "hume_voice_id",
       label: "Hume voice id",
@@ -801,30 +1012,42 @@ async function waitForAssistantReply(params: {
 
 async function synthesizeHumeAudio(params: {
   text: string;
-  apiKey: string;
+  apiKey?: string;
+  backendUrl?: string;
   voiceId: string;
 }): Promise<string> {
-  const response = await fetch("https://api.hume.ai/v0/tts/file", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Hume-Api-Key": params.apiKey,
-    },
-    body: JSON.stringify({
-      utterances: [
-        {
-          text: params.text,
-          voice: {
-            id: params.voiceId,
-          },
-          speed: 1.0,
+  const response = params.backendUrl
+    ? await fetch(`${params.backendUrl}/api/tts/hume`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      ],
-      format: {
-        type: "mp3",
-      },
-    }),
-  });
+        body: JSON.stringify({
+          text: params.text,
+          voiceId: params.voiceId,
+        }),
+      })
+    : await fetch("https://api.hume.ai/v0/tts/file", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hume-Api-Key": params.apiKey ?? "",
+        },
+        body: JSON.stringify({
+          utterances: [
+            {
+              text: params.text,
+              voice: {
+                id: params.voiceId,
+              },
+              speed: 1.0,
+            },
+          ],
+          format: {
+            type: "mp3",
+          },
+        }),
+      });
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -867,13 +1090,14 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   if (resolved.tts.provider !== "hume") {
     return;
   }
-  if (!resolved.tts.humeApiKey) {
+  if (!resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
     defaultRuntime.error("[voice] Hume TTS skipped: missing API key");
     return;
   }
   const audioPath = await synthesizeHumeAudio({
     text,
     apiKey: resolved.tts.humeApiKey,
+    backendUrl: resolved.tts.backendUrl,
     voiceId: resolved.tts.humeVoiceId,
   });
   try {
@@ -902,8 +1126,10 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
       "Agora STT provider needs a bridge command. Use --agora-stt-command or VORA_AGORA_STT_COMMAND.",
     );
   }
-  if (resolved.tts.provider === "hume" && !resolved.tts.humeApiKey) {
-    throw new Error("Hume TTS enabled but API key missing. Set --hume-api-key or VORA_HUME_API_KEY.");
+  if (resolved.tts.provider === "hume" && !resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
+    throw new Error(
+      "Hume TTS enabled but no backend/API key is configured. Set --backend-url, --hume-api-key, or VORA_HUME_API_KEY.",
+    );
   }
 
   const gatewayClient = await GatewayChatClient.connect({
@@ -1044,6 +1270,10 @@ function addVoiceOptions(cmd: Command) {
     .option(
       "--agora-stt-command <cmd>",
       "External command for Agora STT bridge (supports {lang}, {timeout_ms}); default uses bundled browser bridge",
+    )
+    .option(
+      "--backend-url <url>",
+      `Voice backend URL for provider secrets/tokens (default: ${DEFAULT_VOICE_BACKEND_URL}; use "off" for local env mode)`,
     )
     .option("--tts-provider <none|hume>", "Voice reply provider")
     .option("--hume-api-key <key>", "Hume API key")

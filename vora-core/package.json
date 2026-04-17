@@ -30,6 +30,7 @@
     "!dist/**/*.map",
     "docs/reference/templates/",
     "skills/",
+    "scripts/agora-stt-bridge.mjs",
     "scripts/postinstall-bundled-plugins.mjs"
   ],
   "type": "module",

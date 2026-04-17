@@ -5,6 +5,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import {
   buildGatewayInstallPlan,
   gatewayInstallErrorHint,
+  gatewayServiceNeedsCurrentInstallRefresh,
 } from "../commands/daemon-install-helpers.js";
 import {
   DEFAULT_GATEWAY_DAEMON_RUNTIME,
@@ -141,14 +142,43 @@ export async function finalizeSetupWizard(
     const loaded = await service.isLoaded({ env: process.env });
     let restartWasScheduled = false;
     if (loaded) {
-      const action = await prompter.select({
-        message: "Gateway service already installed",
-        options: [
-          { value: "restart", label: "Restart" },
-          { value: "reinstall", label: "Reinstall" },
-          { value: "skip", label: "Skip" },
-        ],
+      const installRefresh = await gatewayServiceNeedsCurrentInstallRefresh({
+        service,
+        env: process.env,
+        port: settings.port,
+        runtime: daemonRuntime,
+        config: nextConfig,
       });
+      let action: "restart" | "reinstall" | "skip";
+      if (installRefresh.needed && flow === "quickstart") {
+        await prompter.note(
+          `Installed Gateway is stale (${installRefresh.reason}). Reinstalling so the background service uses this VORA version.`,
+          "Gateway service",
+        );
+        action = "reinstall";
+      } else {
+        action = await prompter.select({
+          message: installRefresh.needed
+            ? "Gateway service already installed but needs refresh"
+            : "Gateway service already installed",
+          options: installRefresh.needed
+            ? [
+                {
+                  value: "reinstall",
+                  label: "Reinstall",
+                  hint: installRefresh.reason,
+                },
+                { value: "restart", label: "Restart old install" },
+                { value: "skip", label: "Skip" },
+              ]
+            : [
+                { value: "restart", label: "Restart" },
+                { value: "reinstall", label: "Reinstall" },
+                { value: "skip", label: "Skip" },
+              ],
+          initialValue: installRefresh.needed ? "reinstall" : "restart",
+        });
+      }
       if (action === "restart") {
         let restartDoneMessage = "Gateway service restarted.";
         await withWizardProgress(

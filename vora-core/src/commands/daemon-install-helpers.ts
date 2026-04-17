@@ -7,12 +7,17 @@ import { collectDurableServiceEnvVars } from "../config/state-dir-dotenv.js";
 import type { VoraConfig } from "../config/types.js";
 import { resolveGatewayLaunchAgentLabel } from "../daemon/constants.js";
 import { resolveGatewayProgramArguments } from "../daemon/program-args.js";
+import type {
+  GatewayServiceCommandConfig,
+  GatewayServiceEnv,
+} from "../daemon/service-types.js";
 import { buildServiceEnvironment } from "../daemon/service-env.js";
 import {
   isDangerousHostEnvOverrideVarName,
   isDangerousHostEnvVarName,
   normalizeEnvVarKey,
 } from "../infra/host-env-security.js";
+import { VERSION } from "../version.js";
 import {
   emitDaemonInstallRuntimeWarning,
   resolveDaemonInstallRuntimeInputs,
@@ -28,6 +33,24 @@ export type GatewayInstallPlan = {
   workingDirectory?: string;
   environment: Record<string, string | undefined>;
 };
+
+export type GatewayInstallRefreshCheck = {
+  needed: boolean;
+  reason?: string;
+};
+
+type GatewayServiceCommandReader = {
+  readCommand: (env: GatewayServiceEnv) => Promise<GatewayServiceCommandConfig | null>;
+};
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function trimOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
 
 function collectAuthProfileServiceEnvVars(params: {
   env: Record<string, string | undefined>;
@@ -148,6 +171,51 @@ export async function buildGatewayInstallPlan(params: {
       serviceEnvironment,
     }),
   };
+}
+
+export async function gatewayServiceNeedsCurrentInstallRefresh(params: {
+  service: GatewayServiceCommandReader;
+  env: GatewayServiceEnv;
+  port: number;
+  runtime: GatewayDaemonRuntime;
+  config?: VoraConfig;
+  warn?: DaemonInstallWarnFn;
+}): Promise<GatewayInstallRefreshCheck> {
+  const current = await params.service.readCommand(params.env).catch(() => null);
+  if (!current) {
+    return { needed: true, reason: "service command is unreadable" };
+  }
+
+  const currentVersion = trimOptional(current.environment?.VORA_SERVICE_VERSION);
+  if (!currentVersion) {
+    return { needed: true, reason: "service version marker is missing" };
+  }
+  if (currentVersion !== VERSION) {
+    return {
+      needed: true,
+      reason: `service version is ${currentVersion}, current CLI is ${VERSION}`,
+    };
+  }
+
+  const expected = await buildGatewayInstallPlan({
+    env: params.env,
+    port: params.port,
+    runtime: params.runtime,
+    warn: params.warn,
+    config: params.config,
+  });
+
+  if (!sameStringArray(current.programArguments, expected.programArguments)) {
+    return { needed: true, reason: "service command points at a different CLI install" };
+  }
+
+  const currentWorkingDirectory = trimOptional(current.workingDirectory);
+  const expectedWorkingDirectory = trimOptional(expected.workingDirectory);
+  if (currentWorkingDirectory !== expectedWorkingDirectory) {
+    return { needed: true, reason: "service working directory differs from current install" };
+  }
+
+  return { needed: false };
 }
 
 export function gatewayInstallErrorHint(platform = process.platform): string {

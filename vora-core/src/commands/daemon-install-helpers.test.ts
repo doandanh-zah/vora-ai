@@ -34,8 +34,10 @@ vi.mock("../daemon/service-env.js", () => ({
 import {
   buildGatewayInstallPlan,
   gatewayInstallErrorHint,
+  gatewayServiceNeedsCurrentInstallRefresh,
   resolveGatewayDevMode,
 } from "./daemon-install-helpers.js";
+import { VERSION } from "../version.js";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -493,6 +495,78 @@ describe("buildGatewayInstallPlan — dotenv merge", () => {
     });
 
     expect(plan.environment.VORA_PORT).toBe("3000");
+  });
+});
+
+describe("gatewayServiceNeedsCurrentInstallRefresh", () => {
+  let isolatedHome: string;
+  beforeEach(() => {
+    isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), "oc-refresh-test-"));
+  });
+  afterEach(() => {
+    fs.rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
+  it("refreshes when the service version marker is stale", async () => {
+    const service = {
+      readCommand: vi.fn().mockResolvedValue({
+        programArguments: ["node", "gateway"],
+        environment: { VORA_SERVICE_VERSION: "0.1.0" },
+      }),
+    };
+
+    const result = await gatewayServiceNeedsCurrentInstallRefresh({
+      service,
+      env: { HOME: isolatedHome },
+      port: 3000,
+      runtime: "node",
+    });
+
+    expect(result.needed).toBe(true);
+    expect(result.reason).toContain("service version is 0.1.0");
+  });
+
+  it("refreshes when the service command points at another install", async () => {
+    mockNodeGatewayPlanFixture();
+    const service = {
+      readCommand: vi.fn().mockResolvedValue({
+        programArguments: ["node", "/old/vora-ai/dist/index.js", "gateway"],
+        workingDirectory: "/Users/me",
+        environment: { VORA_SERVICE_VERSION: VERSION },
+      }),
+    };
+
+    const result = await gatewayServiceNeedsCurrentInstallRefresh({
+      service,
+      env: { HOME: isolatedHome },
+      port: 3000,
+      runtime: "node",
+    });
+
+    expect(result).toEqual({
+      needed: true,
+      reason: "service command points at a different CLI install",
+    });
+  });
+
+  it("does not refresh when version, command, and working directory match", async () => {
+    mockNodeGatewayPlanFixture();
+    const service = {
+      readCommand: vi.fn().mockResolvedValue({
+        programArguments: ["node", "gateway"],
+        workingDirectory: "/Users/me",
+        environment: { VORA_SERVICE_VERSION: VERSION },
+      }),
+    };
+
+    const result = await gatewayServiceNeedsCurrentInstallRefresh({
+      service,
+      env: { HOME: isolatedHome },
+      port: 3000,
+      runtime: "node",
+    });
+
+    expect(result).toEqual({ needed: false });
   });
 });
 
