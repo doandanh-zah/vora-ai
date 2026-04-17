@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_API_BASE = "https://api.agora.io";
 const DEFAULT_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
-const DEFAULT_LANGUAGE = "vi-VN";
+const DEFAULT_LANGUAGE = "en-US,vi-VN";
 const DEFAULT_RTC_UID = "1002";
 const DEFAULT_STT_AUDIO_UID = "111";
 const DEFAULT_STT_TEXT_UID = "222";
@@ -15,16 +15,16 @@ const DEFAULT_STT_BOT_UID = DEFAULT_STT_AUDIO_UID;
 
 function printUsage() {
   const lines = [
-    "Agora STT bridge (browser + RTC + Agora RTT) for `vora voice`",
+  "Agora STT bridge (RTC + Agora RTT capture) for `vora voice`",
     "",
     "Usage:",
     "  node scripts/agora-stt-bridge.mjs [options]",
     "",
     "Options:",
-    "  --lang <code>          STT language (default: vi-VN)",
+    `  --lang <code>          STT language(s), comma-separated max 2 (default: ${DEFAULT_LANGUAGE})`,
     "  --timeout-ms <ms>      Timeout waiting for final transcript",
     "  --channel <name>       RTC channel name",
-    "  --uid <uid>            Browser RTC UID (default: 1002)",
+    "  --uid <uid>            Capture RTC UID (default: 1002)",
     "  --rtc-token <token>    RTC token for browser + STT bot",
     "  --stt-audio-uid <uid>  STT audio bot UID for Agora RTT service",
     "  --stt-text-uid <uid>   STT text bot UID for Agora RTT data stream",
@@ -35,7 +35,9 @@ function printUsage() {
     "  --customer-key <key>   Agora customer key (or VORA_AGORA_CUSTOMER_KEY)",
     "  --customer-secret <s>  Agora customer secret (or VORA_AGORA_CUSTOMER_SECRET)",
     "  --port <port>          Fixed local bridge port",
-    "  --no-open              Do not auto-open browser",
+    "  --browser-mode <mode>  managed|external|none (default: managed)",
+    "  --show-browser         Show the managed browser window for debugging",
+    "  --no-open              Do not start the managed/external capture page",
     "  --help                 Show this help",
     "",
     "Environment fallbacks:",
@@ -44,6 +46,7 @@ function printUsage() {
     "  VORA_AGORA_CHANNEL, VORA_AGORA_UID, VORA_AGORA_RTC_TOKEN",
     "  VORA_AGORA_STT_AUDIO_UID, VORA_AGORA_STT_TEXT_UID, VORA_AGORA_STT_BOT_UID",
     "  VORA_AGORA_API_BASE, VORA_AGORA_STT_TIMEOUT_MS, VORA_AGORA_STT_LANG",
+    "  VORA_AGORA_STT_BROWSER_MODE, VORA_AGORA_STT_SHOW_BROWSER",
   ];
   process.stderr.write(`${lines.join("\n")}\n`);
 }
@@ -66,6 +69,10 @@ function parseArgs(argv) {
     }
     if (token === "--open") {
       out.open = true;
+      continue;
+    }
+    if (token === "--show-browser") {
+      out["show-browser"] = true;
       continue;
     }
     const eq = token.indexOf("=");
@@ -148,6 +155,110 @@ function openUrl(url) {
       `[agora-stt-bridge] Could not auto-open browser. Open manually: ${url}\n${String(error)}\n`,
     );
   }
+}
+
+function readBoolean(argValue, envName, fallback = false) {
+  if (typeof argValue === "boolean") {
+    return argValue;
+  }
+  const raw = typeof argValue === "string" ? argValue : process.env[envName];
+  if (!raw) {
+    return fallback;
+  }
+  const normalized = String(raw).trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function resolveBrowserMode(args) {
+  const raw = readText(args["browser-mode"], "VORA_AGORA_STT_BROWSER_MODE", "managed").toLowerCase();
+  if (raw === "managed" || raw === "external" || raw === "none") {
+    return raw;
+  }
+  return "managed";
+}
+
+function browserExecutableCandidates() {
+  if (process.platform === "darwin") {
+    return [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+  }
+  if (process.platform === "win32") {
+    const roots = [
+      process.env.PROGRAMFILES,
+      process.env["PROGRAMFILES(X86)"],
+      process.env.LOCALAPPDATA,
+    ].filter(Boolean);
+    return roots.flatMap((root) => [
+      `${root}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${root}\\Google\\Chrome\\Application\\chrome.exe`,
+    ]);
+  }
+  return [
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+  ];
+}
+
+async function openManagedBrowser(url, showBrowser) {
+  let chromium;
+  try {
+    ({ chromium } = await import("playwright-core"));
+  } catch (error) {
+    throw new Error(`playwright-core is unavailable: ${String(error)}`);
+  }
+
+  const executablePath = browserExecutableCandidates().find((candidate) => {
+    try {
+      return Boolean(candidate) && typeof candidate === "string" && spawnSync(candidate, ["--version"], {
+        stdio: "ignore",
+        shell: process.platform === "win32",
+      }).status === 0;
+    } catch {
+      return false;
+    }
+  });
+
+  const launchOptions = {
+    headless: !showBrowser,
+    args: [
+      "--use-fake-ui-for-media-stream",
+      "--autoplay-policy=no-user-gesture-required",
+      "--no-first-run",
+      "--disable-background-timer-throttling",
+    ],
+  };
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else if (process.platform === "win32") {
+    launchOptions.channel = "msedge";
+  } else {
+    launchOptions.channel = "chrome";
+  }
+
+  const browser = await chromium.launch(launchOptions);
+  const context = await browser.newContext({
+    permissions: ["microphone"],
+    viewport: { width: 720, height: 520 },
+  });
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  return {
+    close: async () => {
+      await browser.close().catch(() => undefined);
+    },
+  };
 }
 
 function jsonResponse(res, statusCode, payload) {
@@ -437,7 +548,12 @@ function buildBrowserHtml(browserConfig) {
           if (words.length === 0) {
             return;
           }
-          const text = words.map((word) => String(word?.text || "")).join("").trim();
+          const text = words
+            .map((word) => String(word?.text || "").trim())
+            .filter(Boolean)
+            .join(" ")
+            .replace(/\\s+([,.!?;:])/g, "$1")
+            .trim();
           if (!text) {
             return;
           }
@@ -553,6 +669,15 @@ function buildBrowserHtml(browserConfig) {
 </html>`;
 }
 
+function parseLanguages(lang) {
+  const languages = String(lang || DEFAULT_LANGUAGE)
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  return languages.length > 0 ? languages : [DEFAULT_LANGUAGE.split(",")[0]];
+}
+
 async function startAgoraStt(config, lang) {
   if (config.backendUrl) {
     const payload = await backendJsonRequest(config.backendUrl, "/api/agora/stt/start", {
@@ -573,7 +698,7 @@ async function startAgoraStt(config, lang) {
   const auth = Buffer.from(`${config.customerKey}:${config.customerSecret}`).toString("base64");
   const startPayload = {
     name: `vora-voice-${Date.now()}`,
-    languages: [lang],
+    languages: parseLanguages(lang),
     maxIdleTime: Math.max(10, Math.min(300, Math.ceil(config.timeoutMs / 1000))),
     rtcConfig: {
       channelName: config.channel,
@@ -677,6 +802,8 @@ async function main() {
     lang: readText(args.lang, "VORA_AGORA_STT_LANG", DEFAULT_LANGUAGE),
     timeoutMs: readPositiveInt(args["timeout-ms"], "VORA_AGORA_STT_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
     open: args.open !== false,
+    browserMode: args.open === false ? "none" : resolveBrowserMode(args),
+    showBrowser: readBoolean(args["show-browser"], "VORA_AGORA_STT_SHOW_BROWSER", false),
     port: readPositiveInt(args.port, "VORA_AGORA_STT_PORT", 0),
   };
 
@@ -703,6 +830,16 @@ async function main() {
   let server;
   let done = false;
   let currentAgentId = "";
+  let browserController = null;
+
+  const closeBrowser = async () => {
+    if (!browserController) {
+      return;
+    }
+    const controller = browserController;
+    browserController = null;
+    await controller.close().catch(() => undefined);
+  };
 
   const fail = async (message) => {
     if (done) {
@@ -710,6 +847,7 @@ async function main() {
     }
     done = true;
     await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
+    await closeBrowser();
     if (server) {
       await closeServer(server);
     }
@@ -723,6 +861,7 @@ async function main() {
     }
     done = true;
     await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
+    await closeBrowser();
     if (server) {
       await closeServer(server);
     }
@@ -819,10 +958,27 @@ async function main() {
   const localUrl = `http://127.0.0.1:${address.port}/`;
   const source = resolvedConfig.backendUrl ? `backend=${safeBase(resolvedConfig.backendUrl)}` : "direct-agora";
   process.stderr.write(`[agora-stt-bridge] channel=${resolvedConfig.channel} uid=${resolvedConfig.uid} ${source}\n`);
-  process.stderr.write(`[agora-stt-bridge] open this URL if browser does not auto-open:\n${localUrl}\n`);
+  process.stderr.write(`[agora-stt-bridge] local capture URL:\n${localUrl}\n`);
   process.stderr.write("[agora-stt-bridge] waiting for one final transcript...\n");
-  if (config.open) {
+  if (config.browserMode === "managed") {
+    try {
+      browserController = await openManagedBrowser(localUrl, config.showBrowser);
+      process.stderr.write(
+        `[agora-stt-bridge] managed browser capture started${config.showBrowser ? "" : " (hidden)"}\n`,
+      );
+    } catch (error) {
+      await fail(
+        [
+          `managed browser unavailable: ${String(error)}`,
+          "Install Google Chrome/Microsoft Edge, or run with --browser-mode external for manual debugging.",
+        ].join("\n"),
+      );
+      return;
+    }
+  } else if (config.browserMode === "external") {
     openUrl(localUrl);
+  } else {
+    process.stderr.write("[agora-stt-bridge] browser auto-open disabled; open the local capture URL manually.\n");
   }
 
   const timeout = setTimeout(() => {

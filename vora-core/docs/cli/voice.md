@@ -13,7 +13,7 @@ Wake-word terminal loop:
 - OpenWakeWord (`wake_word/main.py`) listens for trigger
 - STT adapter captures one command transcript
 - Transcript is sent to Gateway via `chat.send`
-- Assistant reply is printed, optional Hume TTS playback
+- Assistant reply is printed, optional ElevenLabs TTS playback
 
 ## Commands
 
@@ -25,7 +25,7 @@ vora voice doctor
 ## Core options
 
 - `--stt-provider <manual|agora>`: choose STT input path.
-- `--tts-provider <none|hume>`: choose reply voice playback.
+- `--tts-provider <none|elevenlabs>`: choose reply voice playback.
 - `--once`: stop after one successful wake -> reply turn.
 - `--wake-dir <path>`, `--wake-model <path>`, `--wake-threshold <0..1>`.
 - `--session <key>`, `--url`, `--token`, `--password` for Gateway target/session.
@@ -61,19 +61,21 @@ Common optional env:
 - `VORA_AGORA_STT_BOT_UID`
 - `VORA_AGORA_API_BASE`
 
-## Hume TTS
+## ElevenLabs TTS
 
 To speak assistant replies:
 
 ```bash
-export VORA_HUME_API_KEY=...
-vora voice --stt-provider manual --tts-provider hume
+export VORA_ELEVENLABS_API_KEY=...
+vora voice --stt-provider manual --tts-provider elevenlabs
 ```
 
 Optional:
 
-- `VORA_HUME_VOICE_ID`
-- or `--hume-voice-id <id>`
+- `VORA_ELEVENLABS_VOICE_ID`
+- `VORA_ELEVENLABS_MODEL_ID`
+- `VORA_ELEVENLABS_OUTPUT_FORMAT`
+- or the matching `--eleven-labs-*` CLI flags
 
 ## Health checks
 

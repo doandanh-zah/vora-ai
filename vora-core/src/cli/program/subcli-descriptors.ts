@@ -56,7 +56,7 @@ export const SUB_CLI_DESCRIPTORS = [
   {
     name: "voice",
     description:
-      "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional Hume TTS)",
+      "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional ElevenLabs TTS)",
     hasSubcommands: true,
   },
   {

@@ -5,7 +5,7 @@ import agoraToken from "agora-token";
 
 const { RtcRole, RtcTokenBuilder } = agoraToken;
 
-const DEFAULT_LANGUAGE = "vi-VN";
+const DEFAULT_LANGUAGE = "en-US,vi-VN";
 const DEFAULT_UID = "1002";
 const DEFAULT_STT_AUDIO_UID = "111";
 const DEFAULT_STT_TEXT_UID = "222";
@@ -20,7 +20,7 @@ const tokenSchema = z.object({
   sttAudioUid: z.string().regex(/^\d+$/).optional(),
   sttTextUid: z.string().regex(/^\d+$/).optional(),
   sttBotUid: z.string().regex(/^\d+$/).optional(),
-  lang: z.string().min(2).max(32).optional(),
+  lang: z.string().min(2).max(64).optional(),
   timeoutMs: z.coerce.number().int().positive().max(300_000).optional(),
 });
 
@@ -95,10 +95,20 @@ function sttIdleSeconds(session) {
   return Math.max(MIN_STT_IDLE_SECONDS, Math.min(MAX_STT_IDLE_SECONDS, Math.ceil(session.timeoutMs / 1000)));
 }
 
+function sttLanguages(session) {
+  const raw = String(session.lang || DEFAULT_LANGUAGE);
+  const languages = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  return languages.length > 0 ? languages : [DEFAULT_LANGUAGE.split(",")[0]];
+}
+
 function buildSttJoinBody(config, session) {
   return {
     name: session.channel,
-    languages: [session.lang],
+    languages: sttLanguages(session),
     maxIdleTime: sttIdleSeconds(session),
     rtcConfig: {
       channelName: session.channel,

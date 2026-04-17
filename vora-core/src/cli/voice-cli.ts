@@ -13,7 +13,7 @@ import { GatewayChatClient } from "../tui/gateway-chat.js";
 import { parseTimeoutMs } from "./parse-timeout.js";
 
 type VoiceSttProvider = "manual" | "agora";
-type VoiceTtsProvider = "none" | "hume";
+type VoiceTtsProvider = "none" | "elevenlabs";
 
 type VoiceRootOptions = {
   url?: string;
@@ -21,6 +21,7 @@ type VoiceRootOptions = {
   password?: string;
   session?: string;
   deliver?: boolean;
+  message?: string;
   thinking?: string;
   timeoutMs?: string;
   waitMs?: string;
@@ -35,8 +36,10 @@ type VoiceRootOptions = {
   agoraSttCommand?: string;
   backendUrl?: string;
   ttsProvider?: string;
-  humeApiKey?: string;
-  humeVoiceId?: string;
+  elevenLabsApiKey?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsModelId?: string;
+  elevenLabsOutputFormat?: string;
 };
 
 type VoiceDoctorOptions = Omit<VoiceRootOptions, "deliver" | "thinking" | "once"> & {
@@ -54,6 +57,7 @@ type VoiceRuntimeOptions = {
     password?: string;
     sessionKey: string;
     deliver: boolean;
+    initialMessage?: string;
     thinking?: string;
     timeoutMs?: number;
     waitMs: number;
@@ -76,8 +80,10 @@ type VoiceRuntimeOptions = {
   tts: {
     provider: VoiceTtsProvider;
     backendUrl?: string;
-    humeApiKey?: string;
-    humeVoiceId: string;
+    elevenLabsApiKey?: string;
+    elevenLabsVoiceId: string;
+    elevenLabsModelId: string;
+    elevenLabsOutputFormat: string;
   };
   once: boolean;
 };
@@ -103,9 +109,14 @@ const DEFAULT_WAKE_MODEL_FILE = "hey_vora.onnx";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 const DEFAULT_WAIT_MS = 40_000;
 const DEFAULT_STT_TIMEOUT_MS = 25_000;
-const DEFAULT_STT_LANGUAGE = "vi-VN";
-const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
+const DEFAULT_STT_LANGUAGE = "en-US,vi-VN";
+const DEFAULT_ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
+const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
+const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
 const DEFAULT_VOICE_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
+const DEFAULT_BACKEND_PROBE_TIMEOUT_MS = 60_000;
+const DEFAULT_BACKEND_STT_PROBE_TIMEOUT_MS = 60_000;
+const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 60_000;
 const WAKE_PYTHON_MODULES = ["openwakeword", "pyaudio", "numpy"] as const;
 const WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS = 60_000;
 
@@ -126,7 +137,13 @@ function buildBundledAgoraBridgeCommand(backendUrl?: string): string | undefined
   if (!existsSync(scriptPath)) {
     return undefined;
   }
-  const parts = ["node", quoteShell(scriptPath), "--lang {lang}", "--timeout-ms {timeout_ms}"];
+  const parts = [
+    "node",
+    quoteShell(scriptPath),
+    "--lang {lang}",
+    "--timeout-ms {timeout_ms}",
+    "--browser-mode managed",
+  ];
   if (backendUrl) {
     parts.push("--backend-url", quoteShell(backendUrl));
   }
@@ -206,16 +223,12 @@ function parseSttProvider(
   return agoraCommand || backendUrl ? "agora" : "manual";
 }
 
-function parseTtsProvider(
-  raw: string | undefined,
-  humeApiKey: string | undefined,
-  backendUrl: string | undefined,
-): VoiceTtsProvider {
+function parseTtsProvider(raw: string | undefined, apiKey: string | undefined, backendUrl: string | undefined): VoiceTtsProvider {
   const value = raw?.trim().toLowerCase();
-  if (value === "none" || value === "hume") {
+  if (value === "none" || value === "elevenlabs") {
     return value;
   }
-  return humeApiKey || backendUrl ? "hume" : "none";
+  return apiKey || backendUrl ? "elevenlabs" : "none";
 }
 
 function detectPythonBinary(explicitPython?: string): string | null {
@@ -365,11 +378,13 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
   const bundledAgoraCommand =
     sttProvider === "agora" ? buildBundledAgoraBridgeCommand(backendUrl) : undefined;
   const agoraSttCommand = explicitAgoraCommand ?? bundledAgoraCommand;
-  const humeApiKey =
-    trimToUndefined(opts.humeApiKey) ?? trimToUndefined(process.env.VORA_HUME_API_KEY);
+  const elevenLabsApiKey =
+    trimToUndefined(opts.elevenLabsApiKey) ??
+    trimToUndefined(process.env.VORA_ELEVENLABS_API_KEY) ??
+    trimToUndefined(process.env.ELEVENLABS_API_KEY);
   const ttsProvider = parseTtsProvider(
     trimToUndefined(opts.ttsProvider) ?? trimToUndefined(process.env.VORA_VOICE_TTS_PROVIDER),
-    humeApiKey,
+    elevenLabsApiKey,
     backendUrl,
   );
 
@@ -380,6 +395,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       password: trimToUndefined(opts.password),
       sessionKey: trimToUndefined(opts.session) ?? "main",
       deliver: Boolean(opts.deliver),
+      initialMessage: trimToUndefined(opts.message),
       thinking: trimToUndefined(opts.thinking),
       timeoutMs: parseTimeoutMs(opts.timeoutMs),
       waitMs: parseMs(opts.waitMs, DEFAULT_WAIT_MS),
@@ -402,11 +418,22 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
     tts: {
       provider: ttsProvider,
       backendUrl,
-      humeApiKey,
-      humeVoiceId:
-        trimToUndefined(opts.humeVoiceId) ??
-        trimToUndefined(process.env.VORA_HUME_VOICE_ID) ??
-        DEFAULT_HUME_VOICE_ID,
+      elevenLabsApiKey,
+      elevenLabsVoiceId:
+        trimToUndefined(opts.elevenLabsVoiceId) ??
+        trimToUndefined(process.env.VORA_ELEVENLABS_VOICE_ID) ??
+        trimToUndefined(process.env.ELEVENLABS_VOICE_ID) ??
+        DEFAULT_ELEVENLABS_VOICE_ID,
+      elevenLabsModelId:
+        trimToUndefined(opts.elevenLabsModelId) ??
+        trimToUndefined(process.env.VORA_ELEVENLABS_MODEL_ID) ??
+        trimToUndefined(process.env.ELEVENLABS_MODEL_ID) ??
+        DEFAULT_ELEVENLABS_MODEL_ID,
+      elevenLabsOutputFormat:
+        trimToUndefined(opts.elevenLabsOutputFormat) ??
+        trimToUndefined(process.env.VORA_ELEVENLABS_OUTPUT_FORMAT) ??
+        trimToUndefined(process.env.ELEVENLABS_OUTPUT_FORMAT) ??
+        DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
     },
     once: Boolean(opts.once),
   };
@@ -478,7 +505,7 @@ async function postJsonWithTimeout(url: string, body: unknown, timeoutMs: number
   }
 }
 
-function backendProviderStatus(payload: unknown, provider: "agora" | "hume"): boolean | undefined {
+function backendProviderStatus(payload: unknown, provider: "agora" | "elevenlabs"): boolean | undefined {
   if (!payload || typeof payload !== "object") {
     return undefined;
   }
@@ -537,7 +564,10 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
 
   if (resolved.backendUrl) {
     try {
-      backendHealth = await fetchJsonWithTimeout(`${resolved.backendUrl}/health`, 5_000);
+      backendHealth = await fetchJsonWithTimeout(
+        `${resolved.backendUrl}/health`,
+        DEFAULT_BACKEND_PROBE_TIMEOUT_MS,
+      );
       backendHealthOk = true;
       checks.push({
         key: "voice_backend",
@@ -584,7 +614,7 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
               lang: resolved.stt.language,
               timeoutMs: resolved.stt.timeoutMs,
             },
-            5_000,
+            DEFAULT_BACKEND_PROBE_TIMEOUT_MS,
           );
           checks.push({
             key: "backend_agora",
@@ -614,7 +644,7 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
                 lang: resolved.stt.language,
                 timeoutMs: resolved.stt.timeoutMs,
               },
-              8_000,
+              DEFAULT_BACKEND_STT_PROBE_TIMEOUT_MS,
             );
             checks.push({
               key: "backend_agora_stt",
@@ -677,33 +707,41 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
     });
   }
 
-  if (resolved.tts.provider === "hume") {
+  if (resolved.tts.provider === "elevenlabs") {
     if (resolved.tts.backendUrl) {
-      const humeReady = backendProviderStatus(backendHealth, "hume");
+      const elevenLabsReady = backendProviderStatus(backendHealth, "elevenlabs");
       checks.push({
-        key: "backend_hume",
-        label: "backend Hume",
-        ok: backendHealthOk && humeReady === true,
+        key: "backend_elevenlabs",
+        label: "backend ElevenLabs",
+        ok: backendHealthOk && elevenLabsReady === true,
         message:
-          humeReady === true
+          elevenLabsReady === true
             ? "configured on backend"
-            : humeReady === false
-              ? "backend is missing Hume env"
-              : "backend health does not expose Hume status",
+            : elevenLabsReady === false
+              ? "backend is missing ElevenLabs env"
+              : "backend health does not expose ElevenLabs status",
       });
     } else {
       checks.push({
-        key: "hume_api_key",
-        label: "Hume API key",
-        ok: Boolean(resolved.tts.humeApiKey),
-        message: resolved.tts.humeApiKey ? "configured" : "missing VORA_HUME_API_KEY",
+        key: "elevenlabs_api_key",
+        label: "ElevenLabs API key",
+        ok: Boolean(resolved.tts.elevenLabsApiKey),
+        message: resolved.tts.elevenLabsApiKey
+          ? "configured"
+          : "missing VORA_ELEVENLABS_API_KEY/ELEVENLABS_API_KEY",
       });
     }
     checks.push({
-      key: "hume_voice_id",
-      label: "Hume voice id",
-      ok: Boolean(resolved.tts.humeVoiceId),
-      message: resolved.tts.humeVoiceId,
+      key: "elevenlabs_voice_id",
+      label: "ElevenLabs voice id",
+      ok: Boolean(resolved.tts.elevenLabsVoiceId),
+      message: resolved.tts.elevenLabsVoiceId,
+    });
+    checks.push({
+      key: "elevenlabs_model_id",
+      label: "ElevenLabs model id",
+      ok: Boolean(resolved.tts.elevenLabsModelId),
+      message: resolved.tts.elevenLabsModelId,
     });
   } else {
     checks.push({
@@ -1200,7 +1238,10 @@ async function transcribeSpeech(resolved: VoiceRuntimeOptions): Promise<string> 
     lang: resolved.stt.language,
     timeout_ms: String(resolved.stt.timeoutMs),
   });
-  const result = await runShellCommand(rendered, resolved.stt.timeoutMs);
+  const result = await runShellCommand(
+    rendered,
+    resolved.stt.timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS,
+  );
   if (result.code !== 0) {
     throw new Error(
       `Agora STT bridge failed (exit ${result.code}): ${result.stderr.trim() || "no stderr"}`,
@@ -1301,14 +1342,16 @@ async function waitForAssistantReply(params: {
   return null;
 }
 
-async function synthesizeHumeAudio(params: {
+async function synthesizeElevenLabsAudio(params: {
   text: string;
   apiKey?: string;
   backendUrl?: string;
   voiceId: string;
+  modelId: string;
+  outputFormat: string;
 }): Promise<string> {
   const response = params.backendUrl
-    ? await fetch(`${params.backendUrl}/api/tts/hume`, {
+    ? await fetch(`${params.backendUrl}/api/tts/elevenlabs`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1316,41 +1359,39 @@ async function synthesizeHumeAudio(params: {
         body: JSON.stringify({
           text: params.text,
           voiceId: params.voiceId,
+          modelId: params.modelId,
+          outputFormat: params.outputFormat,
         }),
       })
-    : await fetch("https://api.hume.ai/v0/tts/file", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Hume-Api-Key": params.apiKey ?? "",
-        },
-        body: JSON.stringify({
-          utterances: [
-            {
-              text: params.text,
-              voice: {
-                id: params.voiceId,
-              },
-              speed: 1.0,
-            },
-          ],
-          format: {
-            type: "mp3",
+    : await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
+          params.voiceId,
+        )}?output_format=${encodeURIComponent(params.outputFormat)}`,
+        {
+          method: "POST",
+          headers: {
+            Accept: "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": params.apiKey ?? "",
           },
-        }),
-      });
+          body: JSON.stringify({
+            text: params.text,
+            model_id: params.modelId,
+          }),
+        },
+      );
 
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     throw new Error(
-      `Hume TTS request failed (${response.status}): ${detail.slice(0, 280) || "empty response"}`,
+      `ElevenLabs TTS request failed (${response.status}): ${detail.slice(0, 280) || "empty response"}`,
     );
   }
 
   const audioBytes = Buffer.from(await response.arrayBuffer());
   const filePath = path.join(
     os.tmpdir(),
-    `vora-hume-${Date.now()}-${randomUUID().slice(0, 8)}.mp3`,
+    `vora-elevenlabs-${Date.now()}-${randomUUID().slice(0, 8)}.mp3`,
   );
   await fs.writeFile(filePath, audioBytes);
   return filePath;
@@ -1378,18 +1419,20 @@ async function playAudioFile(filePath: string): Promise<boolean> {
 }
 
 async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<void> {
-  if (resolved.tts.provider !== "hume") {
+  if (resolved.tts.provider !== "elevenlabs") {
     return;
   }
-  if (!resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
-    defaultRuntime.error("[voice] Hume TTS skipped: missing API key");
+  if (!resolved.tts.backendUrl && !resolved.tts.elevenLabsApiKey) {
+    defaultRuntime.error("[voice] ElevenLabs TTS skipped: missing API key");
     return;
   }
-  const audioPath = await synthesizeHumeAudio({
+  const audioPath = await synthesizeElevenLabsAudio({
     text,
-    apiKey: resolved.tts.humeApiKey,
+    apiKey: resolved.tts.elevenLabsApiKey,
     backendUrl: resolved.tts.backendUrl,
-    voiceId: resolved.tts.humeVoiceId,
+    voiceId: resolved.tts.elevenLabsVoiceId,
+    modelId: resolved.tts.elevenLabsModelId,
+    outputFormat: resolved.tts.elevenLabsOutputFormat,
   });
   try {
     const played = await playAudioFile(audioPath);
@@ -1401,7 +1444,51 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   }
 }
 
-async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
+async function runGatewayVoiceTurn(params: {
+  resolved: VoiceRuntimeOptions;
+  gatewayClient: GatewayChatClient;
+  transcript: string;
+}): Promise<boolean> {
+  const transcript = params.transcript.trim();
+  if (!transcript) {
+    return false;
+  }
+  defaultRuntime.log(`You: ${transcript}`);
+
+  const beforeHistory = await params.gatewayClient.loadHistory({
+    sessionKey: params.resolved.gateway.sessionKey,
+    limit: 100,
+  });
+  const beforeText = latestAssistantText(normalizeHistoryMessages(beforeHistory));
+
+  const run = await params.gatewayClient.sendChat({
+    sessionKey: params.resolved.gateway.sessionKey,
+    message: transcript,
+    thinking: params.resolved.gateway.thinking,
+    deliver: params.resolved.gateway.deliver,
+    timeoutMs: params.resolved.gateway.timeoutMs,
+  });
+  defaultRuntime.log(`[voice] run started: ${run.runId}`);
+
+  const reply = await waitForAssistantReply({
+    client: params.gatewayClient,
+    sessionKey: params.resolved.gateway.sessionKey,
+    beforeText,
+    waitMs: params.resolved.gateway.waitMs,
+  });
+  if (!reply) {
+    defaultRuntime.error(
+      `[voice] no assistant reply received within ${params.resolved.gateway.waitMs}ms`,
+    );
+    return false;
+  }
+
+  defaultRuntime.log(`Vora: ${reply}`);
+  await speakReply(params.resolved, reply);
+  return true;
+}
+
+export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
   const resolved = resolveVoiceRuntimeOptions(opts);
   if (!resolved.wake.pythonBin) {
     throw new Error("python runtime missing. Install python3 and re-run `vora voice doctor`.");
@@ -1421,9 +1508,13 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
       "Agora STT provider needs a bridge command. Use --agora-stt-command or VORA_AGORA_STT_COMMAND.",
     );
   }
-  if (resolved.tts.provider === "hume" && !resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
+  if (
+    resolved.tts.provider === "elevenlabs" &&
+    !resolved.tts.backendUrl &&
+    !resolved.tts.elevenLabsApiKey
+  ) {
     throw new Error(
-      "Hume TTS enabled but no backend/API key is configured. Set --backend-url, --hume-api-key, or VORA_HUME_API_KEY.",
+      "ElevenLabs TTS enabled but no backend/API key is configured. Set --backend-url, --elevenlabs-api-key, VORA_ELEVENLABS_API_KEY, or ELEVENLABS_API_KEY.",
     );
   }
 
@@ -1452,6 +1543,21 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     gatewayClient.start();
     await gatewayClient.waitForReady();
 
+    if (resolved.gateway.initialMessage) {
+      busy = true;
+      try {
+        await runGatewayVoiceTurn({
+          resolved,
+          gatewayClient,
+          transcript: resolved.gateway.initialMessage,
+        });
+      } catch (err) {
+        defaultRuntime.error(`[voice] initial turn failed: ${String(err)}`);
+      } finally {
+        busy = false;
+      }
+    }
+
     wakeWord.onVolume((event) => {
       if (Date.now() - latestVolumeLogAt < 3_000) {
         return;
@@ -1466,6 +1572,7 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
           return;
         }
         busy = true;
+        wakeWord.stop();
         try {
           defaultRuntime.log(
             `[voice] wake trigger model=${event.model} score=${event.score.toFixed(2)} latency=${(
@@ -1478,38 +1585,15 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
             defaultRuntime.log("[voice] transcript empty; waiting for next wake trigger");
             return;
           }
-          defaultRuntime.log(`You: ${transcript}`);
-
-          const beforeHistory = await gatewayClient.loadHistory({
-            sessionKey: resolved.gateway.sessionKey,
-            limit: 100,
+          const replied = await runGatewayVoiceTurn({
+            resolved,
+            gatewayClient,
+            transcript,
           });
-          const beforeText = latestAssistantText(normalizeHistoryMessages(beforeHistory));
-
-          const run = await gatewayClient.sendChat({
-            sessionKey: resolved.gateway.sessionKey,
-            message: transcript,
-            thinking: resolved.gateway.thinking,
-            deliver: resolved.gateway.deliver,
-            timeoutMs: resolved.gateway.timeoutMs,
-          });
-          defaultRuntime.log(`[voice] run started: ${run.runId}`);
-
-          const reply = await waitForAssistantReply({
-            client: gatewayClient,
-            sessionKey: resolved.gateway.sessionKey,
-            beforeText,
-            waitMs: resolved.gateway.waitMs,
-          });
-          if (!reply) {
-            defaultRuntime.error(
-              `[voice] no assistant reply received within ${resolved.gateway.waitMs}ms`,
-            );
+          if (!replied) {
             return;
           }
 
-          defaultRuntime.log(`Vora: ${reply}`);
-          await speakReply(resolved, reply);
           turns += 1;
           if (resolved.once && turns >= 1) {
             requestStop();
@@ -1518,6 +1602,15 @@ async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
           defaultRuntime.error(`[voice] turn failed: ${String(err)}`);
         } finally {
           busy = false;
+          if (!stopRequested) {
+            try {
+              await wakeWord.start();
+              defaultRuntime.log("[voice] wake word armed for next turn");
+            } catch (err) {
+              defaultRuntime.error(`[voice] failed to restart wake word: ${String(err)}`);
+              requestStop();
+            }
+          }
         }
       })();
     });
@@ -1551,6 +1644,7 @@ function addVoiceOptions(cmd: Command) {
     .option("--password <password>", "Gateway password")
     .option("--session <key>", 'Session key (default: "main")')
     .option("--deliver", "Deliver assistant replies to linked channel routes", false)
+    .option("--message <text>", "Send an initial message before listening for wake word")
     .option("--thinking <level>", "Thinking level override")
     .option("--timeout-ms <ms>", "chat.send timeout override (ms)")
     .option("--wait-ms <ms>", "Wait budget for assistant reply after send (ms)")
@@ -1564,15 +1658,17 @@ function addVoiceOptions(cmd: Command) {
     .option("--stt-timeout-ms <ms>", "STT timeout (ms)")
     .option(
       "--agora-stt-command <cmd>",
-      "External command for Agora STT bridge (supports {lang}, {timeout_ms}); default uses bundled browser bridge",
+      "External command for Agora STT bridge (supports {lang}, {timeout_ms}); default uses bundled Agora capture bridge",
     )
     .option(
       "--backend-url <url>",
       `Voice backend URL for provider secrets/tokens (default: ${DEFAULT_VOICE_BACKEND_URL}; use "off" for local env mode)`,
     )
-    .option("--tts-provider <none|hume>", "Voice reply provider")
-    .option("--hume-api-key <key>", "Hume API key")
-    .option("--hume-voice-id <id>", "Hume voice ID");
+    .option("--tts-provider <none|elevenlabs>", "Voice reply provider")
+    .option("--eleven-labs-api-key <key>", "ElevenLabs API key")
+    .option("--eleven-labs-voice-id <id>", "ElevenLabs voice ID")
+    .option("--eleven-labs-model-id <id>", "ElevenLabs model ID")
+    .option("--eleven-labs-output-format <format>", "ElevenLabs output format");
 }
 
 export function registerVoiceCli(program: Command) {
@@ -1580,7 +1676,7 @@ export function registerVoiceCli(program: Command) {
     program
       .command("voice")
       .description(
-        "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional Hume TTS)",
+        "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional ElevenLabs TTS)",
       )
       .addHelpText(
         "after",

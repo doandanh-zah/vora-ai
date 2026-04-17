@@ -9,6 +9,7 @@ export function applyLocalSetupWorkspaceConfig(
   baseConfig: VoraConfig,
   workspaceDir: string,
 ): VoraConfig {
+  const heartbeat = baseConfig.agents?.defaults?.heartbeat;
   return {
     ...baseConfig,
     agents: {
@@ -16,6 +17,11 @@ export function applyLocalSetupWorkspaceConfig(
       defaults: {
         ...baseConfig.agents?.defaults,
         workspace: workspaceDir,
+        heartbeat: {
+          ...heartbeat,
+          lightContext: heartbeat?.lightContext ?? true,
+          isolatedSession: heartbeat?.isolatedSession ?? true,
+        },
       },
     },
     gateway: {

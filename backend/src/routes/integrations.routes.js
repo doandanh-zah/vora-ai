@@ -83,5 +83,16 @@ export function createIntegrationsRouter({ config }) {
     });
   });
 
+  router.get("/tts/elevenlabs", async (_req, res) => {
+    const configured = Boolean(config.elevenlabs.apiKey);
+    res.json({
+      ok: configured,
+      provider: "elevenlabs",
+      configured,
+      note: configured ? "Credentials configured" : "Missing ELEVENLABS_API_KEY",
+      requestId: crypto.randomUUID(),
+    });
+  });
+
   return router;
 }

@@ -18,6 +18,8 @@ describe("applyLocalSetupWorkspaceConfig", () => {
     expect(result.session?.dmScope).toBe(ONBOARDING_DEFAULT_DM_SCOPE);
     expect(result.gateway?.mode).toBe("local");
     expect(result.agents?.defaults?.workspace).toBe("/tmp/workspace");
+    expect(result.agents?.defaults?.heartbeat?.lightContext).toBe(true);
+    expect(result.agents?.defaults?.heartbeat?.isolatedSession).toBe(true);
     expect(result.tools?.profile).toBe(ONBOARDING_DEFAULT_TOOLS_PROFILE);
   });
 
@@ -52,5 +54,24 @@ describe("applyLocalSetupWorkspaceConfig", () => {
     const result = applyLocalSetupWorkspaceConfig(baseConfig, "/tmp/workspace");
 
     expect(result.tools?.profile).toBe("full");
+  });
+
+  it("preserves explicit heartbeat context settings", () => {
+    const baseConfig: VoraConfig = {
+      agents: {
+        defaults: {
+          heartbeat: {
+            every: "15m",
+            lightContext: false,
+            isolatedSession: false,
+          },
+        },
+      },
+    };
+    const result = applyLocalSetupWorkspaceConfig(baseConfig, "/tmp/workspace");
+
+    expect(result.agents?.defaults?.heartbeat?.every).toBe("15m");
+    expect(result.agents?.defaults?.heartbeat?.lightContext).toBe(false);
+    expect(result.agents?.defaults?.heartbeat?.isolatedSession).toBe(false);
   });
 });

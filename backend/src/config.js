@@ -77,4 +77,13 @@ export const config = {
     secretKey: readText("HUME_SECRET_KEY", ""),
     voiceId: readText("HUME_VOICE_ID", "9e068547-5ba4-4c8e-8e03-69282a008f04"),
   },
+  elevenlabs: {
+    apiKey: readText("ELEVENLABS_API_KEY", readText("VORA_ELEVENLABS_API_KEY", "")),
+    voiceId: readText("ELEVENLABS_VOICE_ID", readText("VORA_ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")),
+    modelId: readText("ELEVENLABS_MODEL_ID", readText("VORA_ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")),
+    outputFormat: readText(
+      "ELEVENLABS_OUTPUT_FORMAT",
+      readText("VORA_ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128"),
+    ),
+  },
 };
