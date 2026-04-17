@@ -1350,51 +1350,76 @@ async function synthesizeElevenLabsAudio(params: {
   modelId: string;
   outputFormat: string;
 }): Promise<string> {
-  const response = params.backendUrl
-    ? await fetch(`${params.backendUrl}/api/tts/elevenlabs`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: params.text,
-          voiceId: params.voiceId,
-          modelId: params.modelId,
-          outputFormat: params.outputFormat,
-        }),
-      })
-    : await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
-          params.voiceId,
-        )}?output_format=${encodeURIComponent(params.outputFormat)}`,
-        {
+  const attempts: Array<{
+    label: string;
+    run: () => Promise<Response>;
+  }> = [];
+
+  if (params.backendUrl) {
+    attempts.push({
+      label: "backend",
+      run: () =>
+        fetch(`${params.backendUrl}/api/tts/elevenlabs`, {
           method: "POST",
           headers: {
-            Accept: "audio/mpeg",
             "Content-Type": "application/json",
-            "xi-api-key": params.apiKey ?? "",
           },
           body: JSON.stringify({
             text: params.text,
-            model_id: params.modelId,
+            voiceId: params.voiceId,
+            modelId: params.modelId,
+            outputFormat: params.outputFormat,
           }),
-        },
-      );
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(
-      `ElevenLabs TTS request failed (${response.status}): ${detail.slice(0, 280) || "empty response"}`,
-    );
+        }),
+    });
+  }
+  if (params.apiKey) {
+    attempts.push({
+      label: "direct",
+      run: () =>
+        fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
+            params.voiceId,
+          )}?output_format=${encodeURIComponent(params.outputFormat)}`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "audio/mpeg",
+              "Content-Type": "application/json",
+              "xi-api-key": params.apiKey ?? "",
+            },
+            body: JSON.stringify({
+              text: params.text,
+              model_id: params.modelId,
+            }),
+          },
+        ),
+    });
   }
 
-  const audioBytes = Buffer.from(await response.arrayBuffer());
-  const filePath = path.join(
-    os.tmpdir(),
-    `vora-elevenlabs-${Date.now()}-${randomUUID().slice(0, 8)}.mp3`,
-  );
-  await fs.writeFile(filePath, audioBytes);
-  return filePath;
+  let lastError: Error | undefined;
+  for (const attempt of attempts) {
+    const response = await attempt.run();
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      lastError = new Error(
+        `ElevenLabs TTS ${attempt.label} request failed (${response.status}): ${
+          detail.slice(0, 280) || "empty response"
+        }`,
+      );
+      continue;
+    }
+
+    const audioBytes = Buffer.from(await response.arrayBuffer());
+    const filePath = path.join(
+      os.tmpdir(),
+      `vora-elevenlabs-${Date.now()}-${randomUUID().slice(0, 8)}.mp3`,
+    );
+    await fs.writeFile(filePath, audioBytes);
+    return filePath;
+  }
+
+  throw lastError ?? new Error("ElevenLabs TTS unavailable: missing backend URL or API key");
 }
 
 function hasBinary(command: string): boolean {
@@ -1418,22 +1443,78 @@ async function playAudioFile(filePath: string): Promise<boolean> {
   return false;
 }
 
+function quotePowerShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function encodePowerShellCommand(command: string): string {
+  return Buffer.from(command, "utf16le").toString("base64");
+}
+
+async function speakWithSystemVoice(text: string): Promise<boolean> {
+  const textPath = path.join(
+    os.tmpdir(),
+    `vora-system-tts-${Date.now()}-${randomUUID().slice(0, 8)}.txt`,
+  );
+  await fs.writeFile(textPath, text, "utf8");
+  try {
+    if (process.platform === "darwin" && hasBinary("say")) {
+      return (await runShellCommand(`say -f ${quoteShell(textPath)}`, 120_000)).code === 0;
+    }
+    if (process.platform === "win32" && hasBinary("powershell")) {
+      const script = [
+        "Add-Type -AssemblyName System.Speech;",
+        "$speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer;",
+        `$speaker.Speak((Get-Content -Raw -LiteralPath ${quotePowerShellLiteral(textPath)}));`,
+      ].join(" ");
+      const command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encodePowerShellCommand(script),
+      ].join(" ");
+      return (await runShellCommand(command, 120_000)).code === 0;
+    }
+    if (process.platform === "linux" && hasBinary("espeak")) {
+      return (await runShellCommand(`espeak -f ${quoteShell(textPath)}`, 120_000)).code === 0;
+    }
+    return false;
+  } finally {
+    await fs.rm(textPath, { force: true }).catch(() => undefined);
+  }
+}
+
 async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<void> {
   if (resolved.tts.provider !== "elevenlabs") {
     return;
   }
   if (!resolved.tts.backendUrl && !resolved.tts.elevenLabsApiKey) {
-    defaultRuntime.error("[voice] ElevenLabs TTS skipped: missing API key");
+    const spoke = await speakWithSystemVoice(text);
+    if (!spoke) {
+      defaultRuntime.error("[voice] ElevenLabs TTS skipped: missing API key");
+    }
     return;
   }
-  const audioPath = await synthesizeElevenLabsAudio({
-    text,
-    apiKey: resolved.tts.elevenLabsApiKey,
-    backendUrl: resolved.tts.backendUrl,
-    voiceId: resolved.tts.elevenLabsVoiceId,
-    modelId: resolved.tts.elevenLabsModelId,
-    outputFormat: resolved.tts.elevenLabsOutputFormat,
-  });
+  let audioPath: string;
+  try {
+    audioPath = await synthesizeElevenLabsAudio({
+      text,
+      apiKey: resolved.tts.elevenLabsApiKey,
+      backendUrl: resolved.tts.backendUrl,
+      voiceId: resolved.tts.elevenLabsVoiceId,
+      modelId: resolved.tts.elevenLabsModelId,
+      outputFormat: resolved.tts.elevenLabsOutputFormat,
+    });
+  } catch (error) {
+    defaultRuntime.error(`[voice] ElevenLabs TTS failed: ${String(error)}`);
+    const spoke = await speakWithSystemVoice(text);
+    if (!spoke) {
+      defaultRuntime.error("[voice] system TTS fallback unavailable");
+    }
+    return;
+  }
   try {
     const played = await playAudioFile(audioPath);
     if (!played) {
