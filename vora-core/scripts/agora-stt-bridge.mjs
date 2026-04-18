@@ -7,7 +7,7 @@ import http from "node:http";
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_API_BASE = "https://api.agora.io";
 const DEFAULT_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
-const DEFAULT_LANGUAGE = "en-US,vi-VN";
+const DEFAULT_LANGUAGE = "vi-VN,en-US";
 const DEFAULT_RTC_UID = "1002";
 const DEFAULT_STT_AUDIO_UID = "111";
 const DEFAULT_STT_TEXT_UID = "222";
@@ -649,15 +649,12 @@ function buildBrowserHtml(browserConfig) {
             throw new Error("Agora STT start returned no agentId");
           }
           agentId = String(start.agentId);
+          await post("/ready", { agentId });
           setStatus("Listening... speak your command now.", "ok");
         } catch (error) {
           await resolveError(String(error));
         }
       }
-
-      setTimeout(() => {
-        void resolveError("timeout waiting for final transcript");
-      }, Math.max(1000, CONFIG.timeoutMs));
 
       window.addEventListener("beforeunload", () => {
         void cleanup();
@@ -831,6 +828,20 @@ async function main() {
   let done = false;
   let currentAgentId = "";
   let browserController = null;
+  let ready = false;
+  let startupTimeout;
+  let listenTimeout;
+
+  const clearTimers = () => {
+    if (startupTimeout) {
+      clearTimeout(startupTimeout);
+      startupTimeout = undefined;
+    }
+    if (listenTimeout) {
+      clearTimeout(listenTimeout);
+      listenTimeout = undefined;
+    }
+  };
 
   const closeBrowser = async () => {
     if (!browserController) {
@@ -846,6 +857,7 @@ async function main() {
       return;
     }
     done = true;
+    clearTimers();
     await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
     await closeBrowser();
     if (server) {
@@ -860,6 +872,7 @@ async function main() {
       return;
     }
     done = true;
+    clearTimers();
     await stopAgoraStt(resolvedConfig, currentAgentId).catch(() => undefined);
     await closeBrowser();
     if (server) {
@@ -867,6 +880,15 @@ async function main() {
     }
     process.stdout.write(`${text.trim()}\n`);
     process.exit(0);
+  };
+
+  const armListenTimeout = () => {
+    if (listenTimeout) {
+      return;
+    }
+    listenTimeout = setTimeout(() => {
+      void fail(`timeout after ${resolvedConfig.timeoutMs}ms`);
+    }, resolvedConfig.timeoutMs);
   };
 
   server = http.createServer(async (req, res) => {
@@ -884,6 +906,28 @@ async function main() {
         const lang = typeof body?.lang === "string" && body.lang.trim() ? body.lang.trim() : resolvedConfig.lang;
         currentAgentId = await startAgoraStt(resolvedConfig, lang);
         jsonResponse(res, 200, { ok: true, agentId: currentAgentId });
+      } catch (error) {
+        jsonResponse(res, 500, { ok: false, error: String(error) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/ready") {
+      try {
+        const body = await readJsonBody(req);
+        const agentId =
+          typeof body?.agentId === "string" && body.agentId.trim().length > 0
+            ? body.agentId.trim()
+            : currentAgentId;
+        if (agentId && agentId !== currentAgentId) {
+          currentAgentId = agentId;
+        }
+        if (!ready) {
+          ready = true;
+          process.stderr.write("[agora-stt-bridge] ready\n");
+          armListenTimeout();
+        }
+        jsonResponse(res, 200, { ok: true });
       } catch (error) {
         jsonResponse(res, 500, { ok: false, error: String(error) });
       }
@@ -959,7 +1003,10 @@ async function main() {
   const source = resolvedConfig.backendUrl ? `backend=${safeBase(resolvedConfig.backendUrl)}` : "direct-agora";
   process.stderr.write(`[agora-stt-bridge] channel=${resolvedConfig.channel} uid=${resolvedConfig.uid} ${source}\n`);
   process.stderr.write(`[agora-stt-bridge] local capture URL:\n${localUrl}\n`);
-  process.stderr.write("[agora-stt-bridge] waiting for one final transcript...\n");
+  process.stderr.write("[agora-stt-bridge] preparing microphone capture...\n");
+  startupTimeout = setTimeout(() => {
+    void fail("timeout waiting for microphone/STT readiness");
+  }, Math.max(45_000, resolvedConfig.timeoutMs + 15_000));
   if (config.browserMode === "managed") {
     try {
       browserController = await openManagedBrowser(localUrl, config.showBrowser);
@@ -981,12 +1028,8 @@ async function main() {
     process.stderr.write("[agora-stt-bridge] browser auto-open disabled; open the local capture URL manually.\n");
   }
 
-  const timeout = setTimeout(() => {
-    void fail(`timeout after ${resolvedConfig.timeoutMs}ms`);
-  }, resolvedConfig.timeoutMs + 15_000);
-
   const stop = async () => {
-    clearTimeout(timeout);
+    clearTimers();
     if (!done) {
       await fail("interrupted");
     }

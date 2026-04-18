@@ -144,7 +144,7 @@ const DEFAULT_WAKE_MODEL_FILE = "hey_vora.onnx";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 const DEFAULT_WAIT_MS = 40_000;
 const DEFAULT_STT_TIMEOUT_MS = 25_000;
-const DEFAULT_STT_LANGUAGE = "en-US,vi-VN";
+const DEFAULT_STT_LANGUAGE = "vi-VN,en-US";
 const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
 const DEFAULT_HUME_SPEED = 1.2;
 const DEFAULT_TTS_TIMEOUT_MS = 20_000;
@@ -1151,6 +1151,9 @@ function resolveShellCommand(command: string): { bin: string; args: string[] } {
 async function runShellCommand(
   command: string,
   timeoutMs: number,
+  opts?: {
+    onStderrLine?: (line: string) => void;
+  },
 ): Promise<{
   code: number;
   stdout: string;
@@ -1163,16 +1166,29 @@ async function runShellCommand(
 
   let stdout = "";
   let stderr = "";
+  let stderrLineBuffer = "";
   child.stdout?.on("data", (chunk) => {
     stdout += chunk.toString();
   });
   child.stderr?.on("data", (chunk) => {
-    stderr += chunk.toString();
+    const text = chunk.toString();
+    stderr += text;
+    if (opts?.onStderrLine) {
+      stderrLineBuffer += text;
+      const lines = stderrLineBuffer.split(/\r?\n/g);
+      stderrLineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        opts.onStderrLine(line);
+      }
+    }
   });
 
   const done = new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
     child.on("error", reject);
     child.on("close", (code) => {
+      if (opts?.onStderrLine && stderrLineBuffer.trim().length > 0) {
+        opts.onStderrLine(stderrLineBuffer);
+      }
       resolve({
         code: typeof code === "number" ? code : 1,
         stdout,
@@ -1385,7 +1401,7 @@ function extractTranscriptFromCommandOutput(rawOutput: string): string {
 
 async function transcribeSpeech(
   resolved: VoiceRuntimeOptions,
-  opts?: { timeoutMs?: number; prompt?: string },
+  opts?: { timeoutMs?: number; prompt?: string; phase?: string },
 ): Promise<string> {
   if (resolved.stt.provider === "manual") {
     return (await promptLine(opts?.prompt ?? "Say command (type transcript): ")).trim();
@@ -1402,11 +1418,39 @@ async function transcribeSpeech(
     lang: resolved.stt.language,
     timeout_ms: String(timeoutMs),
   });
-  const result = await runShellCommand(rendered, timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS);
+  const phase = opts?.phase ?? "voice";
+  defaultRuntime.log(
+    `[voice] preparing ${phase} STT (${resolved.stt.language}); wait for "listening now" before speaking`,
+  );
+  let readyLogged = false;
+  const result = await runShellCommand(rendered, timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS, {
+    onStderrLine: (line) => {
+      const message = line.trim();
+      if (!message) {
+        return;
+      }
+      if (message === "[agora-stt-bridge] ready") {
+        readyLogged = true;
+        process.stdout.write("\x07");
+        defaultRuntime.log(`[voice] listening now (${resolved.stt.language}); speak now`);
+        return;
+      }
+      if (
+        message.includes("fatal:") ||
+        message.includes("managed browser unavailable") ||
+        message.includes("browser auto-open disabled")
+      ) {
+        defaultRuntime.error(message);
+      }
+    },
+  });
   if (result.code !== 0) {
     throw new Error(
       `Agora STT bridge failed (exit ${result.code}): ${result.stderr.trim() || "no stderr"}`,
     );
+  }
+  if (!readyLogged) {
+    defaultRuntime.log("[voice] STT bridge completed without an explicit ready signal");
   }
   return extractTranscriptFromCommandOutput(result.stdout);
 }
@@ -2242,9 +2286,9 @@ async function runVoiceConversation(params: {
       params.resolved.conversation.followUpSttTimeoutMs,
     );
     defaultRuntime.log(
-      `[voice] follow-up window open for ${Math.round(
+      `[voice] preparing follow-up window (${Math.round(
         followUpListenMs / 1000,
-      )}s; speak naturally, or stay quiet to sleep`,
+      )}s after ready); wait for "listening now"`,
     );
 
     let nextTranscript = "";
@@ -2253,6 +2297,7 @@ async function runVoiceConversation(params: {
         await transcribeSpeech(params.resolved, {
           timeoutMs: followUpListenMs,
           prompt: "Follow-up (blank to sleep): ",
+          phase: "follow-up",
         })
       ).trim();
     } catch (error) {
