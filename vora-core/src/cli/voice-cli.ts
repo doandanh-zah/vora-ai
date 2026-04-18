@@ -65,6 +65,7 @@ type VoiceRootOptions = {
   followUpMs?: string;
   followUpMaxTurns?: string;
   followUpSttTimeoutMs?: string;
+  debug?: boolean;
 };
 
 type VoiceDoctorOptions = Omit<VoiceRootOptions, "deliver" | "thinking" | "once"> & {
@@ -76,6 +77,7 @@ type VoiceSetupOptions = Pick<VoiceRootOptions, "wakeDir" | "python"> & {
 };
 
 type VoiceRuntimeOptions = {
+  debug: boolean;
   gateway: {
     url?: string;
     token?: string;
@@ -143,11 +145,11 @@ type WakeVolumeEvent = {
 const DEFAULT_WAKE_MODEL_FILE = "hey_vora.onnx";
 const DEFAULT_WAKE_THRESHOLD = 0.5;
 const DEFAULT_WAIT_MS = 40_000;
-const DEFAULT_STT_TIMEOUT_MS = 25_000;
-const DEFAULT_STT_LANGUAGE = "vi-VN,en-US";
+const DEFAULT_STT_TIMEOUT_MS = 16_000;
+const DEFAULT_STT_LANGUAGE = "en-US";
 const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
 const DEFAULT_HUME_SPEED = 1.2;
-const DEFAULT_TTS_TIMEOUT_MS = 20_000;
+const DEFAULT_TTS_TIMEOUT_MS = 8_000;
 const DEFAULT_TTS_MAX_CHARS = 900;
 const DEFAULT_ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
@@ -155,12 +157,93 @@ const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
 const DEFAULT_VOICE_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
 const DEFAULT_FOLLOW_UP_MS = 45_000;
 const DEFAULT_FOLLOW_UP_MAX_TURNS = 4;
-const DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS = 12_000;
+const DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS = 10_000;
 const DEFAULT_BACKEND_PROBE_TIMEOUT_MS = 60_000;
 const DEFAULT_BACKEND_STT_PROBE_TIMEOUT_MS = 60_000;
-const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 60_000;
+const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 20_000;
+const DEFAULT_WAKE_ACK_WAIT_MS = 12_000;
 const WAKE_PYTHON_MODULES = ["openwakeword", "pyaudio", "numpy"] as const;
 const WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS = 60_000;
+
+function boolFromEnv(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function isVoiceDebug(opts?: { debug?: boolean }): boolean {
+  return Boolean(opts?.debug) || boolFromEnv(process.env.VORA_VOICE_DEBUG);
+}
+
+function formatMs(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  return `${(ms / 1000).toFixed(ms % 1000 === 0 ? 0 : 1)}s`;
+}
+
+function voiceDebugLog(message: string, opts?: { debug?: boolean }): void {
+  if (isVoiceDebug(opts)) {
+    defaultRuntime.log(theme.muted(message));
+  }
+}
+
+function voiceInfo(message: string): void {
+  defaultRuntime.log(`${theme.accent("›")} ${message}`);
+}
+
+function voiceSuccess(message: string): void {
+  defaultRuntime.log(`${theme.success("✓")} ${message}`);
+}
+
+function voiceWarn(message: string): void {
+  defaultRuntime.log(`${theme.warn("!")} ${message}`);
+}
+
+function voiceBox(title: string, lines: string[]): void {
+  const width = Math.max(title.length + 4, ...lines.map((line) => line.length + 4), 52);
+  const top = `┌─ ${title} ${"─".repeat(Math.max(0, width - title.length - 4))}`;
+  const bottom = `└${"─".repeat(width - 1)}`;
+  defaultRuntime.log(theme.accent(top));
+  for (const line of lines) {
+    defaultRuntime.log(`${theme.accent("│")} ${line}`);
+  }
+  defaultRuntime.log(theme.accent(bottom));
+}
+
+function wrapVoiceText(text: string, width = 86): string[] {
+  const output: string[] = [];
+  for (const rawLine of text.replace(/\r/g, "").split("\n")) {
+    const line = rawLine.trim();
+    if (!line) {
+      output.push("");
+      continue;
+    }
+    let current = "";
+    for (const word of line.split(/\s+/g)) {
+      if (!current) {
+        current = word;
+        continue;
+      }
+      if (`${current} ${word}`.length > width) {
+        output.push(current);
+        current = word;
+        continue;
+      }
+      current = `${current} ${word}`;
+    }
+    if (current) {
+      output.push(current);
+    }
+  }
+  return output.length > 0 ? output : [""];
+}
+
+function voiceMessageBox(label: string, text: string): void {
+  voiceBox(label, wrapVoiceText(text));
+}
 
 function resolveBundledAgoraBridgeScriptPath(): string {
   const candidates = [
@@ -467,6 +550,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
   });
 
   return {
+    debug: isVoiceDebug(opts),
     gateway: {
       url: trimToUndefined(opts.url),
       token: trimToUndefined(opts.token),
@@ -1197,14 +1281,21 @@ async function runShellCommand(
     });
   });
 
+  let timeoutHandle: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => {
+    timeoutHandle = setTimeout(() => {
       child.kill("SIGTERM");
       reject(new Error(`command timeout after ${timeoutMs}ms`));
     }, timeoutMs);
   });
 
-  return await Promise.race([done, timeout]);
+  try {
+    return await Promise.race([done, timeout]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 async function runStreamingCommand(bin: string, args: string[], cwd?: string): Promise<void> {
@@ -1419,8 +1510,11 @@ async function transcribeSpeech(
     timeout_ms: String(timeoutMs),
   });
   const phase = opts?.phase ?? "voice";
-  defaultRuntime.log(
-    `[voice] preparing ${phase} STT (${resolved.stt.language}); wait for "listening now" before speaking`,
+  const startedAt = Date.now();
+  voiceInfo(
+    `STT ${phase}: starting Agora bridge (${resolved.stt.language}, timeout ${formatMs(
+      timeoutMs,
+    )}). Wait for "Listening now" before speaking.`,
   );
   let readyLogged = false;
   const result = await runShellCommand(rendered, timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS, {
@@ -1431,14 +1525,24 @@ async function transcribeSpeech(
       }
       if (message === "[agora-stt-bridge] ready") {
         readyLogged = true;
-        process.stdout.write("\x07");
-        defaultRuntime.log(`[voice] listening now (${resolved.stt.language}); speak now`);
+        if (boolFromEnv(process.env.VORA_VOICE_BEEP)) {
+          process.stdout.write("\x07");
+        }
+        voiceSuccess(`Listening now (${resolved.stt.language}). Speak now.`);
+        return;
+      }
+      const stage = message.match(/^\[agora-stt-bridge\] stage=([a-z0-9_-]+)(?:\s+(.*))?$/i);
+      if (stage) {
+        const label = stage[1]?.replaceAll("_", " ") ?? "bridge";
+        const detail = stage[2]?.trim();
+        voiceInfo(`STT ${label}${detail ? `: ${detail}` : ""}`);
         return;
       }
       if (
         message.includes("fatal:") ||
         message.includes("managed browser unavailable") ||
-        message.includes("browser auto-open disabled")
+        message.includes("browser auto-open disabled") ||
+        message.includes("timeout waiting")
       ) {
         defaultRuntime.error(message);
       }
@@ -1450,9 +1554,11 @@ async function transcribeSpeech(
     );
   }
   if (!readyLogged) {
-    defaultRuntime.log("[voice] STT bridge completed without an explicit ready signal");
+    voiceWarn("STT bridge completed without an explicit ready signal");
   }
-  return extractTranscriptFromCommandOutput(result.stdout);
+  const transcript = extractTranscriptFromCommandOutput(result.stdout);
+  voiceDebugLog(`[voice] STT ${phase} completed in ${formatMs(Date.now() - startedAt)}`);
+  return transcript;
 }
 
 function normalizeHistoryMessages(payload: unknown): unknown[] {
@@ -1525,22 +1631,31 @@ function latestAssistantText(messages: unknown[]): string | null {
   return null;
 }
 
+function countAssistantMessages(messages: unknown[]): number {
+  return messages.filter(isAssistantMessage).length;
+}
+
 async function waitForAssistantReply(params: {
   client: GatewayChatClient;
   sessionKey: string;
   beforeText: string | null;
+  beforeAssistantCount: number;
   waitMs: number;
 }): Promise<string | null> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < params.waitMs) {
-    await sleep(1_000);
+    await sleep(350);
     const history = await params.client.loadHistory({
       sessionKey: params.sessionKey,
       limit: 100,
     });
     const messages = normalizeHistoryMessages(history);
     const current = latestAssistantText(messages);
-    if (current && current !== params.beforeText) {
+    if (
+      current &&
+      (current !== params.beforeText ||
+        countAssistantMessages(messages) > params.beforeAssistantCount)
+    ) {
       return current;
     }
   }
@@ -1846,6 +1961,7 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   if (!ttsText) {
     return;
   }
+  const startedAt = Date.now();
 
   if (resolved.tts.provider === "hume") {
     if (!resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
@@ -1854,6 +1970,7 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
     }
     let audioPath: string;
     try {
+      voiceInfo(`TTS: synthesizing with Hume (timeout ${formatMs(resolved.tts.timeoutMs)})`);
       audioPath = await synthesizeHumeAudio({
         text: ttsText,
         apiKey: resolved.tts.humeApiKey,
@@ -1863,7 +1980,11 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
         timeoutMs: resolved.tts.timeoutMs,
       });
     } catch (error) {
-      defaultRuntime.error(`[voice] Hume TTS failed: ${String(error)}; using system fallback`);
+      defaultRuntime.error(
+        `[voice] Hume TTS failed after ${formatMs(Date.now() - startedAt)}: ${String(
+          error,
+        )}; using system fallback`,
+      );
       const spoke = await speakWithSystemVoice(ttsText);
       if (!spoke) {
         defaultRuntime.error("[voice] system TTS fallback unavailable");
@@ -1871,9 +1992,12 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
       return;
     }
     try {
+      voiceInfo(`TTS: audio ready in ${formatMs(Date.now() - startedAt)}; playing`);
       const played = await playAudioFile(audioPath);
       if (!played) {
         defaultRuntime.log(`[voice] Hume audio generated: ${audioPath}`);
+      } else {
+        voiceSuccess(`TTS: finished in ${formatMs(Date.now() - startedAt)}`);
       }
     } finally {
       await fs.rm(audioPath, { force: true }).catch(() => undefined);
@@ -1890,6 +2014,7 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   }
   let audioPath: string;
   try {
+    voiceInfo(`TTS: synthesizing with ElevenLabs (timeout ${formatMs(resolved.tts.timeoutMs)})`);
     audioPath = await synthesizeElevenLabsAudio({
       text: ttsText,
       apiKey: resolved.tts.elevenLabsApiKey,
@@ -1900,7 +2025,9 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
       timeoutMs: resolved.tts.timeoutMs,
     });
   } catch (error) {
-    defaultRuntime.error(`[voice] ElevenLabs TTS failed: ${String(error)}`);
+    defaultRuntime.error(
+      `[voice] ElevenLabs TTS failed after ${formatMs(Date.now() - startedAt)}: ${String(error)}`,
+    );
     const spoke = await speakWithSystemVoice(ttsText);
     if (!spoke) {
       defaultRuntime.error("[voice] system TTS fallback unavailable");
@@ -1908,9 +2035,12 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
     return;
   }
   try {
+    voiceInfo(`TTS: audio ready in ${formatMs(Date.now() - startedAt)}; playing`);
     const played = await playAudioFile(audioPath);
     if (!played) {
       defaultRuntime.log(`[voice] audio generated: ${audioPath}`);
+    } else {
+      voiceSuccess(`TTS: finished in ${formatMs(Date.now() - startedAt)}`);
     }
   } finally {
     await fs.rm(audioPath, { force: true }).catch(() => undefined);
@@ -2193,7 +2323,7 @@ async function runGatewayVoiceTurn(params: {
   if (!transcript) {
     return { replied: false };
   }
-  defaultRuntime.log(`You: ${transcript}`);
+  voiceMessageBox("You", transcript);
   const turn = await prepareVoiceTurn({
     transcript,
     state: params.state,
@@ -2204,7 +2334,9 @@ async function runGatewayVoiceTurn(params: {
     sessionKey: params.resolved.gateway.sessionKey,
     limit: 100,
   });
-  const beforeText = latestAssistantText(normalizeHistoryMessages(beforeHistory));
+  const beforeMessages = normalizeHistoryMessages(beforeHistory);
+  const beforeText = latestAssistantText(beforeMessages);
+  const beforeAssistantCount = countAssistantMessages(beforeMessages);
 
   const run = await params.gatewayClient.sendChat({
     sessionKey: params.resolved.gateway.sessionKey,
@@ -2214,12 +2346,14 @@ async function runGatewayVoiceTurn(params: {
     attachments: turn.attachments,
     timeoutMs: params.resolved.gateway.timeoutMs,
   });
-  defaultRuntime.log(`[voice] run started: ${run.runId}`);
+  voiceDebugLog(`[voice] run started: ${run.runId}`, params.resolved);
+  voiceInfo("VORA is thinking...");
 
   const reply = await waitForAssistantReply({
     client: params.gatewayClient,
     sessionKey: params.resolved.gateway.sessionKey,
     beforeText,
+    beforeAssistantCount,
     waitMs: params.resolved.gateway.waitMs,
   });
   if (!reply) {
@@ -2229,7 +2363,7 @@ async function runGatewayVoiceTurn(params: {
     return { replied: false };
   }
 
-  defaultRuntime.log(`Vora: ${reply}`);
+  voiceMessageBox("Vora", reply);
   await speakReply(params.resolved, reply);
   if (params.state) {
     params.state.lastUser = transcript;
@@ -2285,10 +2419,10 @@ async function runVoiceConversation(params: {
       params.resolved.conversation.followUpMs,
       params.resolved.conversation.followUpSttTimeoutMs,
     );
-    defaultRuntime.log(
-      `[voice] preparing follow-up window (${Math.round(
+    voiceInfo(
+      `Follow-up window: ${Math.round(
         followUpListenMs / 1000,
-      )}s after ready); wait for "listening now"`,
+      )}s after STT is ready. Wait for "Listening now".`,
     );
 
     let nextTranscript = "";
@@ -2303,24 +2437,60 @@ async function runVoiceConversation(params: {
     } catch (error) {
       const message = String(error);
       if (message.toLowerCase().includes("timeout")) {
-        defaultRuntime.log("[voice] follow-up silence; returning to wake word");
+        voiceInfo("No follow-up heard; returning to wake word.");
         return;
       }
       throw error;
     }
 
     if (!nextTranscript) {
-      defaultRuntime.log("[voice] follow-up silence; returning to wake word");
+      voiceInfo("No follow-up heard; returning to wake word.");
       return;
     }
     if (isVoiceSleepIntent(nextTranscript)) {
-      defaultRuntime.log("[voice] sleeping; wake word armed next");
+      voiceInfo("Sleep command heard; wake word will arm again.");
       return;
     }
 
     followUp = true;
     followUpTurns += 1;
     transcript = nextTranscript;
+  }
+}
+
+async function runWakeGreeting(params: {
+  resolved: VoiceRuntimeOptions;
+  gatewayClient: GatewayChatClient;
+}): Promise<void> {
+  const beforeHistory = await params.gatewayClient.loadHistory({
+    sessionKey: params.resolved.gateway.sessionKey,
+    limit: 100,
+  });
+  const beforeMessages = normalizeHistoryMessages(beforeHistory);
+  const beforeText = latestAssistantText(beforeMessages);
+  const beforeAssistantCount = countAssistantMessages(beforeMessages);
+
+  voiceInfo('Wake detected. Sending "Hey Vora!"');
+  const run = await params.gatewayClient.sendChat({
+    sessionKey: params.resolved.gateway.sessionKey,
+    message: "Hey Vora!",
+    thinking: params.resolved.gateway.thinking,
+    deliver: false,
+    timeoutMs: params.resolved.gateway.timeoutMs,
+  });
+  voiceDebugLog(`[voice] wake ack run started: ${run.runId}`, params.resolved);
+
+  const reply = await waitForAssistantReply({
+    client: params.gatewayClient,
+    sessionKey: params.resolved.gateway.sessionKey,
+    beforeText,
+    beforeAssistantCount,
+    waitMs: Math.min(params.resolved.gateway.waitMs, DEFAULT_WAKE_ACK_WAIT_MS),
+  });
+  if (reply) {
+    voiceMessageBox("Vora", reply);
+  } else {
+    voiceWarn('VORA did not answer "Hey Vora!" quickly; starting STT anyway.');
   }
 }
 
@@ -2402,6 +2572,9 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     }
 
     wakeWord.onVolume((event) => {
+      if (!resolved.debug) {
+        return;
+      }
       if (Date.now() - latestVolumeLogAt < 3_000) {
         return;
       }
@@ -2417,19 +2590,23 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
         busy = true;
         wakeWord.stop();
         try {
-          defaultRuntime.log(
-            `[voice] wake trigger model=${event.model} score=${event.score.toFixed(2)} latency=${(
-              Math.max(0, Date.now() / 1000 - event.sourceTimestampSec) * 1000
-            ).toFixed(0)}ms`,
-          );
+          const latencyMs = (
+            Math.max(0, Date.now() / 1000 - event.sourceTimestampSec) * 1000
+          ).toFixed(0);
+          voiceBox("Wake", [
+            `Wake word detected. Score ${event.score.toFixed(2)}.`,
+            resolved.debug ? `model=${event.model} latency=${latencyMs}ms` : "VORA is waking up.",
+          ]);
 
-          const transcript = (await transcribeSpeech(resolved)).trim();
+          await runWakeGreeting({ resolved, gatewayClient });
+
+          const transcript = (await transcribeSpeech(resolved, { phase: "command" })).trim();
           if (!transcript) {
-            defaultRuntime.log("[voice] transcript empty; waiting for next wake trigger");
+            voiceInfo("Transcript empty; waiting for next wake trigger.");
             return;
           }
           if (isVoiceSleepIntent(transcript)) {
-            defaultRuntime.log("[voice] sleep command heard; wake word remains armed");
+            voiceInfo("Sleep command heard; wake word remains armed.");
             return;
           }
           await runVoiceConversation({
@@ -2451,7 +2628,7 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
           if (!stopRequested) {
             try {
               await wakeWord.start();
-              defaultRuntime.log("[voice] wake word armed for next turn");
+              voiceSuccess("Wake word armed for next turn.");
             } catch (err) {
               defaultRuntime.error(`[voice] failed to restart wake word: ${String(err)}`);
               requestStop();
@@ -2462,21 +2639,22 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     });
 
     await wakeWord.start();
-    defaultRuntime.log(theme.heading("Voice Loop"));
-    defaultRuntime.log(
-      `wake=${resolved.wake.modelPath} threshold=${resolved.wake.threshold} stt=${resolved.stt.provider} tts=${resolved.tts.provider}`,
-    );
-    if (resolved.conversation.followUpEnabled && !resolved.once) {
-      defaultRuntime.log(
-        `follow-up=on max=${resolved.conversation.followUpMaxTurns} listen=${Math.round(
-          Math.min(resolved.conversation.followUpMs, resolved.conversation.followUpSttTimeoutMs) /
-            1000,
-        )}s`,
-      );
-    }
-    defaultRuntime.log(
-      "Listening for wake word. Press Ctrl+C to stop. Run `vora voice doctor` if dependencies fail.",
-    );
+    voiceBox("VORA Voice", [
+      `Gateway session: ${resolved.gateway.sessionKey}`,
+      `Wake threshold: ${resolved.wake.threshold}`,
+      `STT: ${resolved.stt.provider} (${resolved.stt.language}; English-only default)`,
+      `TTS: ${resolved.tts.provider} (timeout ${formatMs(resolved.tts.timeoutMs)})`,
+      resolved.conversation.followUpEnabled && !resolved.once
+        ? `Follow-up: on, max ${resolved.conversation.followUpMaxTurns}, listen ${Math.round(
+            Math.min(resolved.conversation.followUpMs, resolved.conversation.followUpSttTimeoutMs) /
+              1000,
+          )}s`
+        : "Follow-up: off",
+      "Say: Hey Vora. Press Ctrl+C to stop.",
+      resolved.debug
+        ? "Debug logs: on"
+        : "Debug logs: off (set VORA_VOICE_DEBUG=1 to inspect internals)",
+    ]);
 
     await new Promise<void>((resolve) => {
       resolveStopLoop = resolve;
@@ -2530,7 +2708,8 @@ function addVoiceOptions(cmd: Command) {
     .option("--no-follow-up", "Require wake word before every voice turn")
     .option("--follow-up-ms <ms>", "Maximum follow-up listening window after each reply")
     .option("--follow-up-max-turns <n>", "Maximum follow-up turns before re-arming wake word")
-    .option("--follow-up-stt-timeout-ms <ms>", "STT timeout for each follow-up turn");
+    .option("--follow-up-stt-timeout-ms <ms>", "STT timeout for each follow-up turn")
+    .option("--debug", "Show low-level voice runtime diagnostics", false);
 }
 
 export function registerVoiceCli(program: Command) {

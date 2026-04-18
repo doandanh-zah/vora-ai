@@ -7,7 +7,7 @@ import http from "node:http";
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_API_BASE = "https://api.agora.io";
 const DEFAULT_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
-const DEFAULT_LANGUAGE = "vi-VN,en-US";
+const DEFAULT_LANGUAGE = "en-US";
 const DEFAULT_RTC_UID = "1002";
 const DEFAULT_STT_AUDIO_UID = "111";
 const DEFAULT_STT_TEXT_UID = "222";
@@ -625,6 +625,7 @@ function buildBrowserHtml(browserConfig) {
           });
           TextMessage = root.lookupType("agora.audio2text.Text");
 
+          await post("/stage", { stage: "rtc_join", message: "joining Agora RTC" });
           setStatus("Joining RTC channel...");
           client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
           if (typeof client.setClientRole === "function") {
@@ -640,10 +641,12 @@ function buildBrowserHtml(browserConfig) {
           const uid = Number.isFinite(uidRaw) ? uidRaw : null;
           await client.join(CONFIG.appId, CONFIG.channel, rtcToken, uid);
 
+          await post("/stage", { stage: "mic", message: "requesting microphone" });
           setStatus("Microphone setup...");
           micTrack = await AgoraRTC.createMicrophoneAudioTrack();
           await client.publish([micTrack]);
 
+          await post("/stage", { stage: "stt_join", message: "joining Agora STT" });
           const start = await post("/api/start", { lang: CONFIG.lang });
           if (!start?.agentId) {
             throw new Error("Agora STT start returned no agentId");
@@ -832,6 +835,12 @@ async function main() {
   let startupTimeout;
   let listenTimeout;
 
+  const emitStage = (stage, message = "") => {
+    const safeStage = String(stage || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const detail = String(message || "").trim();
+    process.stderr.write(`[agora-stt-bridge] stage=${safeStage}${detail ? ` ${detail}` : ""}\n`);
+  };
+
   const clearTimers = () => {
     if (startupTimeout) {
       clearTimeout(startupTimeout);
@@ -904,8 +913,20 @@ async function main() {
       try {
         const body = await readJsonBody(req);
         const lang = typeof body?.lang === "string" && body.lang.trim() ? body.lang.trim() : resolvedConfig.lang;
+        emitStage("backend_stt", "requesting STT agent");
         currentAgentId = await startAgoraStt(resolvedConfig, lang);
         jsonResponse(res, 200, { ok: true, agentId: currentAgentId });
+      } catch (error) {
+        jsonResponse(res, 500, { ok: false, error: String(error) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/stage") {
+      try {
+        const body = await readJsonBody(req);
+        emitStage(body?.stage, body?.message);
+        jsonResponse(res, 200, { ok: true });
       } catch (error) {
         jsonResponse(res, 500, { ok: false, error: String(error) });
       }
@@ -1001,18 +1022,16 @@ async function main() {
 
   const localUrl = `http://127.0.0.1:${address.port}/`;
   const source = resolvedConfig.backendUrl ? `backend=${safeBase(resolvedConfig.backendUrl)}` : "direct-agora";
-  process.stderr.write(`[agora-stt-bridge] channel=${resolvedConfig.channel} uid=${resolvedConfig.uid} ${source}\n`);
-  process.stderr.write(`[agora-stt-bridge] local capture URL:\n${localUrl}\n`);
-  process.stderr.write("[agora-stt-bridge] preparing microphone capture...\n");
+  emitStage("session", `channel=${resolvedConfig.channel} uid=${resolvedConfig.uid} ${source}`);
+  emitStage("server", `local capture URL ${localUrl}`);
+  emitStage("browser", "starting hidden capture browser");
   startupTimeout = setTimeout(() => {
     void fail("timeout waiting for microphone/STT readiness");
-  }, Math.max(45_000, resolvedConfig.timeoutMs + 15_000));
+  }, Math.max(18_000, resolvedConfig.timeoutMs + 8_000));
   if (config.browserMode === "managed") {
     try {
       browserController = await openManagedBrowser(localUrl, config.showBrowser);
-      process.stderr.write(
-        `[agora-stt-bridge] managed browser capture started${config.showBrowser ? "" : " (hidden)"}\n`,
-      );
+      emitStage("browser", `capture browser started${config.showBrowser ? "" : " hidden"}`);
     } catch (error) {
       await fail(
         [

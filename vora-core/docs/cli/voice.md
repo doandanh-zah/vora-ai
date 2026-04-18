@@ -19,7 +19,7 @@ Wake-word terminal loop:
 The Agora STT bridge prints a clear readiness cue before every capture:
 
 ```text
-[voice] listening now (vi-VN,en-US); speak now
+✓ Listening now (en-US). Speak now.
 ```
 
 Wait for that line, or the terminal beep, before speaking. The follow-up timer
@@ -36,8 +36,9 @@ vora voice doctor
 ## Core options
 
 - `--stt-provider <manual|agora>`: choose STT input path.
-- `--stt-lang <lang>`: STT language list. Default is `vi-VN,en-US`.
+- `--stt-lang <lang>`: STT language list. Default is `en-US`.
 - `--tts-provider <none|hume|elevenlabs>`: choose reply voice playback.
+- `--debug`: show low-level voice diagnostics, including mic levels and run IDs.
 - `--once`: stop after one successful wake -> reply turn.
 - `--no-follow-up`: require wake word before every turn.
 - `--follow-up-max-turns <n>`: cap spoken follow-ups before re-arming wake word.
@@ -60,7 +61,7 @@ After wake trigger, type transcript into terminal.
 
 - `scripts/agora-stt-bridge.mjs`
 - supports placeholders `{lang}` and `{timeout_ms}` in custom commands
-- defaults to `vi-VN,en-US` so Vietnamese is prioritized while English still works
+- defaults to `en-US`. Beta voice mode expects English speech for the most reliable STT.
 
 Required env for bundled bridge:
 
@@ -76,10 +77,10 @@ Common optional env:
 - `VORA_AGORA_STT_BOT_UID`
 - `VORA_AGORA_API_BASE`
 
-If you mostly speak Vietnamese and want to remove English auto-detection noise:
+Use English-only mode for the current beta:
 
 ```bash
-vora voice --stt-provider agora --stt-lang vi-VN
+vora voice --stt-provider agora --stt-lang en-US
 ```
 
 ## Hume TTS

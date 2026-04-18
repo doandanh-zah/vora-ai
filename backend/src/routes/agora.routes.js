@@ -5,7 +5,7 @@ import agoraToken from "agora-token";
 
 const { RtcRole, RtcTokenBuilder } = agoraToken;
 
-const DEFAULT_LANGUAGE = "vi-VN,en-US";
+const DEFAULT_LANGUAGE = "en-US";
 const DEFAULT_UID = "1002";
 const DEFAULT_STT_AUDIO_UID = "111";
 const DEFAULT_STT_TEXT_UID = "222";
