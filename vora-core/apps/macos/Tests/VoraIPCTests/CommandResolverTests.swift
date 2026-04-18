@@ -23,7 +23,7 @@ import Testing
         return (tmp, pnpmPath)
     }
 
-    @Test func `prefers open claw binary`() throws {
+    @Test func `prefers vora binary`() throws {
         let defaults = self.makeLocalDefaults()
 
         let tmp = try makeTempDirForTests()
@@ -63,7 +63,7 @@ import Testing
         }
     }
 
-    @Test func `prefers open claw binary over pnpm`() throws {
+    @Test func `prefers vora binary over pnpm`() throws {
         let defaults = self.makeLocalDefaults()
 
         let tmp = try makeTempDirForTests()
@@ -84,7 +84,7 @@ import Testing
         #expect(cmd.prefix(2).elementsEqual([voraPath.path, "rpc"]))
     }
 
-    @Test func `uses open claw binary without node runtime`() throws {
+    @Test func `uses vora binary without node runtime`() throws {
         let defaults = self.makeLocalDefaults()
 
         let tmp = try makeTempDirForTests()
