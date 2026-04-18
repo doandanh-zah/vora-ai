@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const VoraLogo: React.FC<{ size?: number }> = ({ size = 120 }) => {
+export const VoraLogo: React.FC<{ size?: number; hideText?: boolean }> = ({ size = 120, hideText = false }) => {
   return (
     <div className="flex flex-col items-center gap-4">
       <svg
@@ -43,7 +43,7 @@ export const VoraLogo: React.FC<{ size?: number }> = ({ size = 120 }) => {
         <rect x="62" y="40" width="4" height="22" rx="2" fill="white" className="animate-bounce" style={{ animationDuration: '0.7s' }} />
         <rect x="71" y="48" width="4" height="10" rx="2" fill="white" className="animate-bounce" style={{ animationDuration: '0.9s' }} />
       </svg>
-      <h1 className="text-4xl font-bold tracking-[0.2em] text-white mt-4 drop-shadow-md">VORA</h1>
+      {!hideText && <h1 className="text-4xl font-bold tracking-[0.2em] text-white mt-4 drop-shadow-md">VORA</h1>}
     </div>
   );
 };

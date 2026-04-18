@@ -7,6 +7,13 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::path::PathBuf;
+use std::env::home_dir;
+
+#[cfg(target_os = "windows")]
+const VORA_BIN: &str = "vora.cmd";
+#[cfg(not(target_os = "windows"))]
+const VORA_BIN: &str = "vora";
 
 // --- Data Structures ---
 
@@ -107,7 +114,55 @@ fn get_sessions_path(app: &AppHandle) -> std::path::PathBuf {
     app.path().app_config_dir().unwrap().join("sessions.json")
 }
 
-fn ensure_config_dir(app: &AppHandle) {
+fn get_agent_dir(agent_name: &str) -> PathBuf {
+    let mut p = home_dir().unwrap_or_else(|| PathBuf::from("."));
+    p.push(".vora");
+    p.push("agents");
+    p.push(agent_name);
+    p.push("agent");
+    p
+}
+
+fn sync_agent_credentials(groq_key: &str) {
+    let agent_dir = get_agent_dir("main");
+    println!("Syncing agent credentials to: {:?}", agent_dir);
+    if !agent_dir.exists() { 
+        println!("Agent dir not found: {:?}", agent_dir);
+        return; 
+    }
+
+    // 1. Sync auth-profiles.json
+    let auth_path = agent_dir.join("auth-profiles.json");
+    if let Ok(content) = fs::read_to_string(&auth_path) {
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(profile) = json.get_mut("profiles").and_then(|p| p.get_mut("groq:default")) {
+                if groq_key.len() > 4 {
+                    println!("Updating auth-profiles.json with key prefix: {}...", &groq_key[..4]);
+                }
+                profile["key"] = serde_json::Value::String(groq_key.to_string());
+                let result = fs::write(&auth_path, serde_json::to_string_pretty(&json).unwrap_or(content.clone()));
+                println!("Result of auth sync: {:?}", result);
+            }
+        }
+    }
+
+    // 2. Sync models.json
+    let models_path = agent_dir.join("models.json");
+    if let Ok(content) = fs::read_to_string(&models_path) {
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(groq) = json.get_mut("providers").and_then(|p| p.get_mut("groq")) {
+                if groq_key.len() > 4 {
+                     println!("Updating models.json with apiKey prefix: {}...", &groq_key[..4]);
+                }
+                groq["apiKey"] = serde_json::Value::String(groq_key.to_string());
+                let result = fs::write(&models_path, serde_json::to_string_pretty(&json).unwrap_or(content));
+                println!("Result of models sync: {:?}", result);
+            }
+        }
+    }
+}
+
+pub fn ensure_config_dir(app: &AppHandle) {
     let dir = app.path().app_config_dir().unwrap();
     fs::create_dir_all(&dir).ok();
 }
@@ -343,8 +398,20 @@ fn phase1_item(key: &str, label: &str, ok: bool, message: String) -> Phase1Check
     }
 }
 
-fn call_gateway(method: &str, params: serde_json::Value, expect_final: bool) -> Result<serde_json::Value, String> {
-    let mut cmd = Command::new("vora");
+fn call_gateway(
+    method: &str, 
+    params: serde_json::Value, 
+    expect_final: bool,
+    data: &SetupData,
+) -> Result<serde_json::Value, String> {
+    let mut cmd = Command::new(VORA_BIN);
+    
+    // Inject auth from Tauri state into the CLI environment
+    cmd.env("GROQ_API_KEY", &data.groq_api_key)
+       .env("TELEGRAM_BOT_TOKEN", &data.telegram_token)
+       .env("DISCORD_BOT_TOKEN", &data.discord_token)
+       .env("OLLAMA_HOST", &data.ollama_base_url);
+
     cmd.arg("--no-color")
         .arg("gateway")
         .arg("call")
@@ -417,7 +484,7 @@ fn session_key_for_gateway(active_session_id: &str) -> String {
     }
 }
 
-fn send_chat_via_gateway(prompt: &str, active_session_id: &str) -> Result<String, String> {
+fn send_chat_via_gateway(prompt: &str, active_session_id: &str, data: &SetupData) -> Result<String, String> {
     let session_key = session_key_for_gateway(active_session_id);
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -431,7 +498,7 @@ fn send_chat_via_gateway(prompt: &str, active_session_id: &str) -> Result<String
         "deliver": false,
         "idempotencyKey": run_id
     });
-    let _ = call_gateway("chat.send", send_params, true)?;
+    let _ = call_gateway("chat.send", send_params, true, data)?;
 
     // Poll short-window history so UI receives a real assistant message, not just "started".
     for _ in 0..20 {
@@ -442,6 +509,7 @@ fn send_chat_via_gateway(prompt: &str, active_session_id: &str) -> Result<String
                 "limit": 12
             }),
             false,
+            data,
         )?;
         if let Some(text) = latest_assistant_reply(&history) {
             return Ok(text);
@@ -523,20 +591,38 @@ async fn update_settings(
 ) -> Result<String, String> {
     {
         let mut g = state.0.lock().unwrap();
-        g.provider = provider;
-        g.groq_api_key = groq_api_key;
-        g.ollama_model = ollama_model;
-        g.ollama_base_url = ollama_base_url;
+        g.provider = provider.trim().to_string();
+        g.groq_api_key = groq_api_key.trim().to_string();
+        g.ollama_model = ollama_model.trim().to_string();
+        g.ollama_base_url = ollama_base_url.trim().to_string();
         g.gateway_mode = gateway_mode;
         g.gateway_port = gateway_port;
-        g.telegram_token = telegram_token;
-        g.discord_token = discord_token;
-        g.discord_guild = discord_guild;
+        g.telegram_token = telegram_token.trim().to_string();
+        g.discord_token = discord_token.trim().to_string();
+        g.discord_guild = discord_guild.trim().to_string();
     }
     let data = state.0.lock().unwrap().clone();
     ensure_config_dir(&app);
     fs::write(get_config_path(&app), serde_json::to_string(&data).unwrap()).ok();
-    Ok("Settings saved".into())
+
+    // Sync to VORA CLI config permanently (Global)
+    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("gateway.port").arg(gateway_port.to_string()).output();
+    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("channels.telegram.botToken").arg(telegram_token).output();
+    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("channels.discord.token").arg(discord_token).output();
+    
+    if data.provider == "groq" {
+         // Sync to global config
+         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("agents.defaults.model.primary").arg("groq/llama-3.1-8b-instant").output();
+         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("models.providers.groq.apiKey").arg(&groq_api_key).output();
+         
+         // Deep sync to agent-specific files (overwriting isolated configs)
+         sync_agent_credentials(&groq_api_key);
+    } else if data.provider == "ollama" {
+         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("agents.defaults.model.primary").arg(format!("ollama/{}", ollama_model)).output();
+         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("models.providers.ollama.baseUrl").arg(&ollama_base_url).output();
+    }
+
+    Ok("Settings deeply synced successfully".into())
 }
 
 #[tauri::command]
@@ -596,7 +682,7 @@ async fn run_phase1_self_check(
         },
     ));
 
-    let gateway_check = Command::new("vora")
+    let gateway_check = Command::new(VORA_BIN)
         .arg("--no-color")
         .arg("gateway")
         .arg("status")
@@ -968,7 +1054,8 @@ fn run_chat_pipeline(app: &AppHandle, state: &State<'_, AppState>, prompt: &str)
     let _provider_hint = data.provider.clone();
 
     // Phase 1 bridge: route chat through the real VORA gateway/agent pipeline.
-    let reply = send_chat_via_gateway(prompt, &session_id_for_context)?;
+    // Pass the current state data (including tokens) to the gateway bridge
+    let reply = send_chat_via_gateway(prompt, &session_id_for_context, &data)?;
 
     // Save to state
     let session_id = {
@@ -1055,12 +1142,28 @@ async fn hatch_test_prompt(
     send_chat(app, state, confirm_state, prompt).await
 }
 
+struct GatewayState(Mutex<Option<std::process::Child>>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState(Mutex::new(SetupData::default())))
         .manage(WakeWordState(Mutex::new(None)))
         .manage(ConfirmGateState(Mutex::new(None)))
+        .manage(GatewayState(Mutex::new(None)))
+        .setup(|app| {
+            let _ = Command::new(VORA_BIN)
+                .arg("gateway")
+                .arg("run")
+                .spawn()
+                .map(|child| {
+                    let state = app.state::<GatewayState>();
+                    let mut guard = state.0.lock().unwrap();
+                    *guard = Some(child);
+                    println!("VORA Gateway auto-started");
+                });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_setup_status, start_setup_session, select_gateway_mode,
             set_gateway_port, install_gateway_service, select_model_provider,

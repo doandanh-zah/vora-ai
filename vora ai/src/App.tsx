@@ -154,9 +154,15 @@ export default function App() {
     if (provider === 'groq') await invoke('save_groq_api_key', { key: groqKey });
     await invoke('set_gateway_port', { port });
     await invoke('update_settings', {
-      provider, groqApiKey: groqKey, ollamaModel, ollamaBaseUrl: ollamaUrl,
-      gatewayMode: mode, gatewayPort: port,
-      telegramToken, discordToken, discordGuild,
+      provider,
+      groqApiKey: groqKey,
+      ollamaModel: ollamaModel,
+      ollamaBaseUrl: ollamaUrl,
+      gatewayMode: mode,
+      gatewayPort: port,
+      telegramToken: telegramToken,
+      discordToken: discordToken,
+      discordGuild: discordGuild,
     });
     await invoke('commit_setup_config');
     setView('chat');

@@ -4,17 +4,17 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Send, Mic, MicOff, MessageSquare, AudioLines, Settings,
   Sparkles, Trash2, Save, Menu, Key, Server, Cpu, Plus,
-  MessageCircle, Globe, Hash, Bot
+  MessageCircle, Globe, Hash, Bot, Shield, Eye, EyeOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { VoraLogo } from '@/components/VoraLogo';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Session = { id: string; title: string; created_at: string; messages: ChatMessage[] };
@@ -93,6 +93,10 @@ export const ChatPage = () => {
     gateway_port: 27106, telegram_token: '', discord_token: '', discord_guild: ''
   });
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showGroq, setShowGroq] = useState(false);
+  const [showTele, setShowTele] = useState(false);
+  const [showDiscord, setShowDiscord] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -129,7 +133,7 @@ export const ChatPage = () => {
           gateway_mode: s.gateway_mode || 'local', gateway_port: s.gateway_port || 27106,
           telegram_token: s.telegram_token || '', discord_token: s.discord_token || '', discord_guild: s.discord_guild || '',
         });
-        setPrivacyEnabled(status.privacy_enabled !== false);
+        setPrivacyEnabled(s.privacy_enabled !== false);
       } catch (e) { console.error(e); }
       await refreshSessions(true);
 
@@ -262,6 +266,12 @@ export const ChatPage = () => {
     loadingRef.current = loading;
   }, [loading]);
 
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
   const refreshSessions = async (autoSelect = false) => {
     try {
       const list = await invoke<Session[]>('list_sessions');
@@ -362,12 +372,32 @@ export const ChatPage = () => {
   };
 
   const saveSettings = async () => {
-    await invoke('update_settings', {
-      provider: cfg.provider, groqApiKey: cfg.groq_api_key, ollamaModel: cfg.ollama_model,
-      ollamaBaseUrl: cfg.ollama_base_url, gatewayMode: cfg.gateway_mode, gatewayPort: cfg.gateway_port,
-      telegramToken: cfg.telegram_token, discordToken: cfg.discord_token, discordGuild: cfg.discord_guild,
-    });
-    setSaved(true); setTimeout(() => setSaved(false), 2000);
+    try {
+      setSaving(true);
+      console.log('[DEBUG] ChatPage saveSettings calling update_settings with:', {
+        provider: cfg.provider,
+        groqApiKey: cfg.groq_api_key ? (cfg.groq_api_key.substring(0, 7) + '...') : 'empty',
+        telegram: cfg.telegram_token ? 'is_set' : 'empty'
+      });
+      await invoke('update_settings', {
+        provider: cfg.provider,
+        groqApiKey: cfg.groq_api_key,
+        ollamaModel: cfg.ollama_model,
+        ollamaBaseUrl: cfg.ollama_base_url,
+        gatewayMode: cfg.gateway_mode,
+        gatewayPort: cfg.gateway_port,
+        telegramToken: cfg.telegram_token,
+        discordToken: cfg.discord_token,
+        discordGuild: cfg.discord_guild,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      alert('Failed to save settings: ' + String(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const runPhase1SelfCheck = async () => {
@@ -475,442 +505,533 @@ export const ChatPage = () => {
     }
   };
 
-  const FieldGroup = ({ label, icon, children }: { label: string; icon: React.ReactNode; children: React.ReactNode }) => (
+  const FieldGroup = ({ label, icon, children, action }: { label: string; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) => (
     <div className="space-y-2">
-      <Label className="text-xs flex items-center gap-1.5">{icon} {label}</Label>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs flex items-center gap-1.5">{icon} {label}</Label>
+        {action}
+      </div>
       {children}
     </div>
   );
 
   return (
-    <div className="flex flex-col h-screen bg-background text-foreground">
+    <div className="flex flex-col h-screen bg-background text-foreground overflow-hidden">
       {/* ─── Header ─── */}
-      <header className="flex items-center justify-between px-3 py-2 border-b border-border bg-card/80 backdrop-blur-xl shrink-0 z-10">
-        <div className="flex items-center gap-2">
-          {/* Sessions sidebar */}
+      <header className="flex items-center justify-between px-3 h-12 border-b border-border bg-card/80 backdrop-blur-xl shrink-0 z-10">
+        <div className="flex-1 flex items-center gap-2">
+          {/* Sessions Sidebar Trigger */}
           <Sheet open={sideOpen} onOpenChange={setSideOpen}>
             <SheetTrigger asChild>
-              <Button variant="default" size="icon" className="h-8 w-8">
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                 <Menu className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-
-            <SheetContent side="left" className="w-[280px] p-0 flex flex-col">
-              <SheetHeader className="p-4 pb-2">
-                <SheetTitle className="text-xs uppercase tracking-widest text-muted-foreground">Sessions</SheetTitle>
+            <SheetContent side="left" className="w-[280px] p-0 flex flex-col border-r border-border bg-card overflow-hidden">
+              <SheetHeader className="p-4 border-b border-border">
+                <SheetTitle className="text-xs uppercase tracking-widest text-muted-foreground font-bold">Sessions</SheetTitle>
               </SheetHeader>
-
-              <div className="px-3 pb-2">
-                <Button variant="outline" size="sm" className="w-full justify-start gap-2" onClick={newChat}>
+              <div className="px-3 py-3 border-b border-border/50">
+                <Button variant="outline" size="sm" className="w-full justify-start gap-2 border-white/10 bg-white/5 hover:bg-white/10" onClick={newChat}>
                   <Plus className="h-3.5 w-3.5" /> New Chat
                 </Button>
               </div>
-
-              <Separator />
-
-              <ScrollArea className="flex-1 px-3 py-2">
-                {sessions.length === 0 && <p className="text-muted-foreground text-xs text-center py-8 italic">No sessions yet</p>}
-                <div className="space-y-1">
+              <div className="flex-1 overflow-y-auto min-h-0 px-3 py-2 custom-scrollbar">
+                {sessions.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-12 opacity-30">
+                    <MessageCircle className="h-8 w-8 mb-2" />
+                    <p className="text-xs italic">No sessions yet</p>
+                  </div>
+                )}
+                <div className="space-y-1 pb-4">
                   {sessions.map(s => (
                     <div key={s.id} onClick={() => switchSession(s.id)}
-                      className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${
-                        s.id === activeId ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
+                      className={`group flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all border ${
+                        s.id === activeId 
+                          ? 'bg-primary/10 border-primary/30 text-primary-foreground shadow-sm' 
+                          : 'border-transparent hover:bg-white/5 text-muted-foreground hover:text-foreground'
                       }`}>
-                      <div className="flex items-center gap-2 min-w-0">
-                        <MessageCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="flex items-center gap-3 min-w-0">
+                        <MessageSquare className={`h-4 w-4 shrink-0 ${s.id === activeId ? 'text-primary' : 'text-muted-foreground/50'}`} />
                         <div className="min-w-0">
-                          <p className="text-xs font-medium truncate">{s.title}</p>
-                          <p className="text-[10px] text-muted-foreground">{new Date(s.created_at).toLocaleDateString()}</p>
+                          <p className="text-xs font-semibold truncate">{s.title || 'Untitled Session'}</p>
+                          <p className="text-[10px] opacity-50">{new Date(s.created_at).toLocaleDateString()}</p>
                         </div>
                       </div>
-
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="destructive" size="icon" className="h-6 w-6"
-                            onClick={e => { e.stopPropagation(); deleteSession(s.id); }}>
-                            <Trash2 className="h-3 w-3 text-destructive" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Delete</TooltipContent>
-                      </Tooltip>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive/70 hover:text-destructive hover:bg-destructive/10"
+                        onClick={e => { e.stopPropagation(); deleteSession(s.id); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   ))}
                 </div>
-              </ScrollArea>
+              </div>
             </SheetContent>
           </Sheet>
 
-              {/* === SETTINGS === */}
-              {panel === 'settings' && (
-                <div className="space-y-5">
-                  {/* Phase 1 Self-check */}
-                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">🧪 Phase 1 Self-Check</p>
-                      <button
-                        onClick={runPhase1SelfCheck}
-                        disabled={checkingPhase1}
-                        className="px-2.5 py-1 rounded-md border border-white/20 text-[10px] uppercase tracking-widest text-white/60 hover:bg-white/10 disabled:opacity-50"
-                      >
-                        {checkingPhase1 ? 'Checking...' : 'Run'}
-                      </button>
-                    </div>
-                    {!phase1Check && <p className="text-[11px] text-white/35">No report yet.</p>}
-                    {phase1Check && (
-                      <div className="space-y-1.5">
-                        <p className={`text-[11px] ${phase1Check.overall_ok ? 'text-emerald-300' : 'text-amber-300'}`}>
-                          {phase1Check.overall_ok ? 'Overall: PASS' : 'Overall: CHECK WARNINGS'}
-                        </p>
-                        {phase1Check.items.map(item => (
-                          <div key={item.key} className="rounded-md border border-white/10 bg-white/5 p-2">
-                            <p className={`text-[11px] ${item.ok ? 'text-emerald-300' : 'text-red-300'}`}>
-                              {item.ok ? '✓' : '✗'} {item.label}
-                            </p>
-                            <p className="text-[10px] text-white/45">{item.message}</p>
-                          </div>
-                        ))}
-                        <p className="text-[10px] text-white/25">
-                          Checked at: {new Date(phase1Check.checked_at).toLocaleString()}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Privacy */}
-                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-3">
-                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">🔒 Privacy</p>
-                    <p className="text-[11px] text-white/45">
-                      {privacyEnabled
-                        ? 'ON: chat + voice pipeline active'
-                        : 'OFF: wake word and outbound commands are paused'}
-                    </p>
-                    <button
-                      onClick={togglePrivacy}
-                      className={`w-full py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider border transition-all ${
-                        privacyEnabled
-                          ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
-                          : 'bg-red-500/12 border-red-400/35 text-red-300'
-                      }`}
-                    >
-                      {privacyEnabled ? 'Disable Privacy Mode' : 'Enable Privacy Mode'}
-                    </button>
-                  </div>
-
-                  {/* Gateway */}
-                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-4">
-                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">⚡ Gateway</p>
-                    <SettingField icon={<Globe size={11} />} label="Mode">
-                      <div className="flex gap-1.5">
-                        {['local', 'cloud'].map(m => (
-                          <button key={m} onClick={() => setCfg({...cfg, gateway_mode: m})}
-                            className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${
-                              cfg.gateway_mode === m ? 'bg-[#6c5ce7]/20 border-[#6c5ce7] text-[#a29bfe]' : 'bg-white/3 border-white/8 text-white/30'
-                            }`}>{m}</button>
-                        ))}
-                      </div>
-                    </SettingField>
-                    <SettingField icon={<Server size={11} />} label="Port">
-                      <input type="number" value={cfg.gateway_port} onChange={e => setCfg({...cfg, gateway_port: parseInt(e.target.value) || 27106})} className="form-input text-xs font-mono" />
-                    </SettingField>
-                  </div>
-
-                  {/* Provider */}
-                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-4">
-                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">🧠 AI Provider</p>
-                    <SettingField icon={<Cpu size={11} />} label="Provider">
-                      <div className="flex gap-1.5">
-                        {['ollama', 'groq'].map(p => (
-                          <button key={p} onClick={() => setCfg({...cfg, provider: p})}
-                            className={`flex-1 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all border ${
-                              cfg.provider === p ? 'bg-[#6c5ce7]/20 border-[#6c5ce7] text-[#a29bfe]' : 'bg-white/3 border-white/8 text-white/30'
-                            }`}>{p}</button>
-                        ))}
-                      </div>
-                    </SettingField>
-                    {cfg.provider === 'groq' && (
-                      <SettingField icon={<Key size={11} />} label="Groq API Key">
-                        <input type="password" value={cfg.groq_api_key} onChange={e => setCfg({...cfg, groq_api_key: e.target.value})} placeholder="gsk_..." className="form-input text-xs" />
-                      </SettingField>
-                    )}
-                    {cfg.provider === 'ollama' && (
-                      <>
-                        <SettingField icon={<Bot size={11} />} label="Model">
-                          <input value={cfg.ollama_model} onChange={e => setCfg({...cfg, ollama_model: e.target.value})} placeholder="llama3.2" className="form-input text-xs" />
-                        </SettingField>
-                        <SettingField icon={<Globe size={11} />} label="Base URL">
-                          <input value={cfg.ollama_base_url} onChange={e => setCfg({...cfg, ollama_base_url: e.target.value})} placeholder="http://localhost:11434" className="form-input text-xs" />
-                        </SettingField>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Channels */}
-                  <div className="p-3 rounded-xl bg-white/3 border border-white/8 space-y-4">
-                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-[0.15em]">📡 Channels</p>
-                    <SettingField icon={<SendIcon size={11} />} label="Telegram Bot Token">
-                      <input type="password" value={cfg.telegram_token} onChange={e => setCfg({...cfg, telegram_token: e.target.value})} placeholder="Optional" className="form-input text-xs" />
-                    </SettingField>
-                    <SettingField icon={<Hash size={11} />} label="Discord Bot Token">
-                      <input type="password" value={cfg.discord_token} onChange={e => setCfg({...cfg, discord_token: e.target.value})} placeholder="Optional" className="form-input text-xs" />
-                    </SettingField>
-                    <SettingField icon={<Hash size={11} />} label="Discord Guild ID">
-                      <input value={cfg.discord_guild} onChange={e => setCfg({...cfg, discord_guild: e.target.value})} placeholder="Optional" className="form-input text-xs" />
-                    </SettingField>
-                  </div>
-
-                  <button onClick={saveSettings} className="btn-primary w-full py-3 flex items-center justify-center gap-2 text-sm">
-                    <Save size={15} /> {settingsSaved ? '✓ Saved!' : 'Save All Settings'}
-                  </button>
-                  <p className="text-[9px] text-white/12 text-center italic pb-2">Settings persist across app restarts</p>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex-1 bg-black/40" onClick={() => setPanel('none')} />
-        </div>
-      )}
-
-      {pendingConfirm && (
-        <div className="absolute inset-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-[#0d0d1a] p-4 space-y-3">
-            <p className="text-[10px] font-bold text-white/35 uppercase tracking-[0.18em]">Approval Required</p>
-            <h3 className="text-sm font-semibold text-white">{pendingConfirm.action}</h3>
-            <p className="text-xs text-white/60">{pendingConfirm.reason}</p>
-            <p className="text-xs text-red-300/90">Risk: {pendingConfirm.risk}</p>
-            {pendingConfirm.prompt_preview && (
-              <div className="rounded-lg bg-white/5 border border-white/10 p-2">
-                <p className="text-[11px] text-white/60 font-mono">{pendingConfirm.prompt_preview}</p>
+          {/* App Branding */}
+          <div className="flex items-center gap-2 px-1 group cursor-default">
+            <VoraLogo size={30} hideText={true} />
+            <div className="flex gap-2 items-center">
+              <span className="text-xs font-bold leading-none tracking-tight text-foreground">VORA</span>
+              <div className="flex items-center gap-1.5 px-2 py-0.5">
+                <div className={`w-1 h-1 rounded-full animate-pulse shadow-[0_0_5px_var(--primary)] ${loading ? 'bg-primary' : 'bg-emerald-500 shadow-emerald-500'}`} />
+                <span className={`text-[10px] font-bold uppercase tracking-widest transition-colors ${loading ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {loading ? 'Thinking' : 'Online'}
+                </span>
               </div>
-            )}
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => resolveConfirm(false)}
-                className="flex-1 py-2 rounded-lg border border-white/20 text-white/65 hover:bg-white/10 text-xs uppercase tracking-widest"
-              >
-                Deny
-              </button>
-              <button
-                onClick={() => resolveConfirm(true)}
-                className="flex-1 py-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 text-xs uppercase tracking-widest"
-              >
-                Approve Once
-              </button>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Header */}
-      <div className="chat-header">
-        <div className="flex items-center gap-2">
-          <button onClick={() => setPanel(panel === 'history' ? 'none' : 'history')} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
-            <Menu size={18} className="text-white/50" />
-          </button>
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#6c5ce7] to-[#a29bfe] flex items-center justify-center">
-            <Sparkles size={14} />
-          </div>
-          <div className="hidden sm:block">
-            <h1 className="text-sm font-bold leading-none">VORA</h1>
-            <p className="text-[10px] text-muted-foreground">{loading ? 'Thinking...' : 'Online'}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <Tabs value={mode} onValueChange={v => setMode(v as 'chat' | 'voice')}>
-            <TabsList className="h-7">
-              <TabsTrigger value="chat" className="text-[11px] px-2.5 gap-1 h-6">
-                <MessageSquare className="h-3 w-3" /> Chat
+        {/* Center Tabs */}
+        <div className="flex-none flex justify-center items-center">
+          <Tabs value={mode} onValueChange={v => setMode(v as 'chat' | 'voice')} className="bg-muted/50 p-0.5 rounded-lg border border-border/50">
+            <TabsList className="h-8 bg-transparent gap-1">
+              <TabsTrigger value="chat" className="text-[10px] font-bold uppercase tracking-wider h-7 px-3 gap-1.5 data-[state=active]:bg-card data-[state=active]:shadow-sm">
+                <MessageCircle className="h-3 w-3" /> Chat
               </TabsTrigger>
-              <TabsTrigger value="voice" className="text-[11px] px-2.5 gap-1 h-6">
+              <TabsTrigger value="voice" className="text-[10px] font-bold uppercase tracking-wider h-7 px-3 gap-1.5 data-[state=active]:bg-card data-[state=active]:shadow-sm">
                 <AudioLines className="h-3 w-3" /> Voice
               </TabsTrigger>
             </TabsList>
           </Tabs>
+        </div>
 
-          {/* Settings */}
-          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen} >
+        <div className="flex-1 flex items-center justify-end gap-1">
+          {/* Settings Sidebar Trigger */}
+          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
             <SheetTrigger asChild>
-              <Button variant="default" size="icon" className="h-8 w-8">
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                 <Settings className="h-4 w-4" />
               </Button>
             </SheetTrigger>
-
-            <SheetContent className="w-[320px] overflow-y-auto">
-              <SheetHeader>
-                <SheetTitle>
-                  Settings
-                </SheetTitle>
+            <SheetContent side="right" className="w-[320px] p-0 flex flex-col border-l border-border bg-card overflow-hidden">
+              <SheetHeader className="p-4 border-b border-border">
+                <SheetTitle className="text-xs uppercase tracking-widest text-muted-foreground font-bold">Settings Area</SheetTitle>
               </SheetHeader>
-
-              <div className="space-y-5 p-4">
-                <div className="space-y-3 p-3 rounded-xl border border-border bg-card">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">⚡ Gateway</p>
-                  <FieldGroup label="Mode" icon={<Globe className="h-3 w-3" />}>
-                    <div className="flex gap-2">
-                      {['local', 'cloud'].map(m => (
-                        <Button key={m} size="sm" variant={cfg.gateway_mode === m ? 'default' : 'outline'}
-                          className="flex-1 text-xs uppercase" onClick={() => setCfg({ ...cfg, gateway_mode: m })}>{m}</Button>
-                      ))}
+              
+              <div className="flex-1 overflow-y-auto min-h-0 px-4 py-6 custom-scrollbar">
+                <div className="space-y-6">
+                  {/* Phase 1 Check */}
+                  <div className="p-4 rounded-2xl border border-white/5 bg-white/[0.03] space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">🧪 Self-Check</p>
+                      <Button variant="outline" size="xs" onClick={runPhase1SelfCheck} disabled={checkingPhase1} className="text-[9px] h-6 px-2.5">
+                        {checkingPhase1 ? 'Checking...' : 'Run Diagnostics'}
+                      </Button>
                     </div>
-                  </FieldGroup>
+                    {phase1Check && (
+                      <div className="space-y-2">
+                        <div className={`text-[10px] font-bold p-2 py-1 rounded-md text-center uppercase tracking-tighter ${phase1Check.overall_ok ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                          Overall Result: {phase1Check.overall_ok ? 'Healthy' : 'Check Warnings'}
+                        </div>
+                        <div className="space-y-1">
+                          {phase1Check.items.map(item => (
+                            <div key={item.key} className="flex flex-col p-2 rounded-lg border border-white/5 bg-white/[0.02]">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-medium">{item.label}</span>
+                                {item.ok ? <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]" /> : <div className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                              </div>
+                              <p className="text-[9px] text-muted-foreground leading-tight mt-0.5">{item.message}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                  <FieldGroup label="Port" icon={<Server className="h-3 w-3" />}>
-                    <Input type="number" value={cfg.gateway_port} onChange={e => setCfg({ ...cfg, gateway_port: parseInt(e.target.value) || 27106 })} className="font-mono text-sm" />
-                  </FieldGroup>
-                </div>
-
-                <div className="space-y-3 p-3 rounded-xl border border-border bg-card">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">🧠 Provider</p>
-                  <FieldGroup label="Provider" icon={<Cpu className="h-3 w-3" />}>
-                    <div className="flex gap-2">
-                      {['ollama', 'groq'].map(p => (
-                        <Button key={p} size="sm" variant={cfg.provider === p ? 'default' : 'outline'}
-                          className="flex-1 text-xs uppercase" onClick={() => setCfg({ ...cfg, provider: p })}>{p}</Button>
-                      ))}
+                  {/* Privacy Toggle */}
+                  <div className="p-4 rounded-2xl border border-white/5 bg-white/[0.03] space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">🔒 Privacy Hub</p>
+                      <Badge variant={privacyEnabled ? 'default' : 'outline'} className={`text-[9px] ${privacyEnabled ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20' : 'text-red-400 border-red-500/20'}`}>
+                        {privacyEnabled ? 'Active' : 'Paused'}
+                      </Badge>
                     </div>
-                  </FieldGroup>
-                  {cfg.provider === 'groq' && (
-                    <FieldGroup label="API Key" icon={<Key className="h-3 w-3" />}>
-                      <Input type="password" value={cfg.groq_api_key} placeholder="gsk_..." onChange={e => setCfg({ ...cfg, groq_api_key: e.target.value })} />
+                    <p className="text-[11px] text-muted-foreground leading-snug italic">
+                      {privacyEnabled 
+                        ? 'All pipelines enabled. Voice detection and outbound tools active.' 
+                        : 'VORA is strictly waiting. Wake word and outbound engines are paused.'}
+                    </p>
+                    <Button 
+                      variant={privacyEnabled ? 'destructive' : 'default'} 
+                      size="sm" 
+                      onClick={togglePrivacy} 
+                      className={`w-full text-xs font-bold uppercase tracking-widest ${privacyEnabled ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/20' : 'border-white/10'}`}
+                    >
+                      {privacyEnabled ? 'Enter Pause Mode' : 'Resume Normal Operations'}
+                    </Button>
+                  </div>
+
+                  {/* Network Config */}
+                  <div className="p-4 rounded-2xl border border-white/5 bg-white/[0.03] space-y-4">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">⚡ Gateway Protocol</p>
+                    <FieldGroup label="Access Mode" icon={<Globe className="h-3 w-3" />}>
+                      <div className="flex gap-2">
+                        {['local', 'cloud'].map(m => (
+                          <Button key={m} size="sm" variant={cfg.gateway_mode === m ? 'secondary' : 'outline'}
+                            className={`flex-1 text-[10px] font-bold uppercase tracking-widest h-8 border-white/5 ${cfg.gateway_mode === m ? 'bg-primary/20 text-primary border-primary/30' : ''}`}
+                            onClick={() => setCfg({ ...cfg, gateway_mode: m })}>{m}</Button>
+                        ))}
+                      </div>
                     </FieldGroup>
-                  )}
-                  {cfg.provider === 'ollama' && (
+                    <FieldGroup label="Port Binding" icon={<Server className="h-3 w-3" />}>
+                      <Input type="number" value={cfg.gateway_port} onChange={e => setCfg({ ...cfg, gateway_port: parseInt(e.target.value) || 27106 })} 
+                        className="bg-white/5 border-white/10 h-9 font-mono text-xs focus:ring-1 focus:ring-primary/50" />
+                    </FieldGroup>
+                  </div>
+
+                  {/* AI Intelligence */}
+                  <div className="p-4 rounded-2xl border border-white/5 bg-white/[0.03] space-y-4">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">🧠 Intelligence</p>
+                    <FieldGroup label="Core Provider" icon={<Cpu className="h-3 w-3" />}>
+                      <div className="flex gap-2">
+                        {['ollama', 'groq'].map(p => (
+                          <Button key={p} size="sm" variant={cfg.provider === p ? 'secondary' : 'outline'}
+                            className={`flex-1 text-[10px] font-bold uppercase tracking-widest h-8 border-white/5 ${cfg.provider === p ? 'bg-primary/20 text-primary border-primary/30' : ''}`}
+                            onClick={() => setCfg({ ...cfg, provider: p })}>{p}</Button>
+                        ))}
+                      </div>
+                    </FieldGroup>
+                    {cfg.provider === 'groq' && (
+                      <FieldGroup 
+                        label="Cloud API Token" 
+                        icon={<Key className="h-3 w-3" />}
+                        action={
+                          <button onClick={() => setShowGroq(!showGroq)} className="opacity-40 hover:opacity-100 transition-opacity">
+                            {showGroq ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          </button>
+                        }
+                      >
+                        <Input 
+                          type={showGroq ? 'text' : 'password'} 
+                          value={cfg.groq_api_key} 
+                          placeholder="gsk_..." 
+                          onChange={e => setCfg({ ...cfg, groq_api_key: e.target.value })}
+                          className="bg-white/5 border-white/10 h-9 text-xs focus:ring-1 focus:ring-primary/50" 
+                        />
+                      </FieldGroup>
+                    )}
+                    {cfg.provider === 'ollama' && (
+                      <div className="space-y-3">
+                        <FieldGroup label="Model Target" icon={<Bot className="h-3 w-3" />}>
+                          <Input value={cfg.ollama_model} placeholder="llama3.2" 
+                             onChange={e => setCfg({ ...cfg, ollama_model: e.target.value })}
+                             className="bg-white/5 border-white/10 h-9 text-xs focus:ring-1 focus:ring-primary/50" />
+                        </FieldGroup>
+                        <FieldGroup label="Base URL" icon={<Globe className="h-3 w-3" />}>
+                          <Input value={cfg.ollama_base_url} placeholder="http://localhost:11434" 
+                            onChange={e => setCfg({ ...cfg, ollama_base_url: e.target.value })}
+                            className="bg-white/5 border-white/10 h-9 text-xs font-mono focus:ring-1 focus:ring-primary/50" />
+                        </FieldGroup>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Comms */}
+                  <div className="p-4 rounded-2xl border border-white/5 bg-white/[0.03] space-y-4">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">📡 Broadcast Channels</p>
+                    <FieldGroup 
+                      label="Telegram Token" 
+                      icon={<Send className="h-3 w-3" />}
+                      action={
+                        <button onClick={() => setShowTele(!showTele)} className="opacity-40 hover:opacity-100 transition-opacity">
+                          {showTele ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </button>
+                      }
+                    >
+                      <Input 
+                        type={showTele ? 'text' : 'password'} 
+                        value={cfg.telegram_token} 
+                        placeholder="bot_..." 
+                        onChange={e => setCfg({ ...cfg, telegram_token: e.target.value })}
+                        className="bg-white/5 border-white/10 h-9 text-xs focus:ring-1 focus:ring-primary/50" 
+                      />
+                    </FieldGroup>
+                    <FieldGroup 
+                      label="Discord Secret" 
+                      icon={<Hash className="h-3 w-3" />}
+                      action={
+                        <button onClick={() => setShowDiscord(!showDiscord)} className="opacity-40 hover:opacity-100 transition-opacity">
+                          {showDiscord ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </button>
+                      }
+                    >
+                      <Input 
+                        type={showDiscord ? 'text' : 'password'} 
+                        value={cfg.discord_token} 
+                        placeholder="Token" 
+                        onChange={e => setCfg({ ...cfg, discord_token: e.target.value })}
+                        className="bg-white/5 border-white/10 h-9 text-xs focus:ring-1 focus:ring-primary/50" 
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Guild Scope" icon={<Hash className="h-3 w-3" />}>
+                      <Input value={cfg.discord_guild} placeholder="Guild ID" 
+                        onChange={e => setCfg({ ...cfg, discord_guild: e.target.value })}
+                        className="bg-white/5 border-white/10 h-9 text-[10px] font-mono focus:ring-1 focus:ring-primary/50" />
+                    </FieldGroup>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-border bg-muted/30 shrink-0">
+                <Button 
+                  variant="default" 
+                  onClick={saveSettings} 
+                  disabled={saving}
+                  className="w-full gap-2 font-bold uppercase tracking-widest py-6 relative overflow-hidden"
+                >
+                  {saving ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                      Syncing...
+                    </div>
+                  ) : (
                     <>
-                      <FieldGroup label="Model" icon={<Bot className="h-3 w-3" />}>
-                        <Input value={cfg.ollama_model} placeholder="llama3.2" onChange={e => setCfg({ ...cfg, ollama_model: e.target.value })} />
-                      </FieldGroup>
-                      <FieldGroup label="Base URL" icon={<Globe className="h-3 w-3" />}>
-                        <Input value={cfg.ollama_base_url} placeholder="http://localhost:11434" onChange={e => setCfg({ ...cfg, ollama_base_url: e.target.value })} />
-                      </FieldGroup>
+                      <Save className="h-4 w-4" /> {saved ? 'System Updated' : 'Apply Changes'}
                     </>
                   )}
-                </div>
-
-                <div className="space-y-3 p-3 rounded-xl border border-border bg-card">
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">📡 Channels</p>
-                  <FieldGroup label="Telegram Token" icon={<Send className="h-3 w-3" />}>
-                    <Input type="password" value={cfg.telegram_token} placeholder="Optional" onChange={e => setCfg({ ...cfg, telegram_token: e.target.value })} />
-                  </FieldGroup>
-                  <FieldGroup label="Discord Token" icon={<Hash className="h-3 w-3" />}>
-                    <Input type="password" value={cfg.discord_token} placeholder="Optional" onChange={e => setCfg({ ...cfg, discord_token: e.target.value })} />
-                  </FieldGroup>
-                  <FieldGroup label="Guild ID" icon={<Hash className="h-3 w-3" />}>
-                    <Input value={cfg.discord_guild} placeholder="Optional" onChange={e => setCfg({ ...cfg, discord_guild: e.target.value })} />
-                  </FieldGroup>
-                </div>
-
-                <Button variant="default" onClick={saveSettings} className="w-full gap-2">
-                  <Save className="h-4 w-4" /> {saved ? '✓ Saved!' : 'Save All'}
                 </Button>
+                <p className="text-[9px] text-center text-muted-foreground mt-3 italic uppercase tracking-tighter opacity-50">Config persists in secure local vault</p>
               </div>
             </SheetContent>
           </Sheet>
         </div>
       </header>
 
-      {/* ─── Chat ─── */}
-      {mode === 'chat' && (
-        <>
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3" ref={scrollRef}>
-            {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-3 opacity-40">
-                <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center">
-                  <Sparkles className="h-6 w-6 text-primary" />
+      {/* ─── Main Content Area ─── */}
+      <main className="flex-1 relative flex flex-col overflow-hidden">
+        {/* ─── CHAT MODE ─── */}
+        {mode === 'chat' && (
+          <div className="flex-1 flex flex-col min-h-0 relative">
+            {/* Scrollable Message Area */}
+            <div 
+              ref={scrollRef as any}
+              className="flex-1 overflow-y-auto custom-scrollbar px-4 scroll-smooth"
+            >
+              <div className="max-w-2xl mx-auto space-y-6 pt-6 pb-40">
+                {messages.length === 0 && (
+                  <div className="bg-card/30 border border-white/5 rounded-3xl p-8 flex flex-col items-center gap-4 text-center mt-20 animate-in fade-in zoom-in duration-500">
+                    <div className="relative group">
+                      <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <VoraLogo size={64} hideText={true} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-bold tracking-tight">VORA AI Agent</h2>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-[240px]">Connected via {cfg.provider || 'system'}. Initialized and waiting for protocols.</p>
+                    </div>
+                  </div>
+                )}
+                {messages.map((msg, i) => (
+                  <div key={i} className={`flex flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 fade-in duration-300`}>
+                    <div className={`flex items-center gap-2 mb-1 px-1`}>
+                       <span className={`text-[9px] font-bold uppercase tracking-widest opacity-40`}>
+                         {msg.role === 'user' ? 'Operator' : 'VORA_Core'}
+                       </span>
+                    </div>
+                    <div className={`max-w-[85%] sm:max-w-[75%] px-4 py-3 rounded-2xl text-[13px] leading-relaxed shadow-sm border ${
+                      msg.role === 'user'
+                        ? 'bg-primary border-primary/20 text-primary-foreground rounded-tr-sm'
+                        : 'bg-card border-border text-foreground rounded-tl-sm'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+                {loading && (
+                  <div className="flex justify-start animate-in fade-in duration-200">
+                    <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3">
+                      <div className="flex gap-1.5 py-1">
+                        <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-duration:0.6s]" />
+                        <div className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce [animation-duration:0.6s] [animation-delay:0.2s]" />
+                        <div className="w-1.5 h-1.5 bg-primary/30 rounded-full animate-bounce [animation-duration:0.6s] [animation-delay:0.4s]" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Input Bar (Fixed to Bottom) */}
+            <div className="fixed bottom-0 left-0 right-0 p-4 pt-2 bg-gradient-to-t from-background via-background/90 to-transparent z-50">
+              <div className="max-w-2xl w-full mx-auto">
+                <div className="relative flex items-end gap-2 bg-card/60 backdrop-blur-2xl border border-white/10 rounded-2xl p-1.5 shadow-xl">
+                   <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={e => { setInput(e.target.value); autoResize(); }}
+                    onKeyDown={handleKeyDown}
+                    placeholder={privacyEnabled ? 'Command VORA...' : 'Protocols locked · Wake word only'}
+                    className="flex-1 bg-transparent border-0 ring-0 focus:ring-0 outline-none focus:outline-none text-sm px-3 py-2.5 max-h-32 min-h-[42px] resize-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                    rows={1}
+                    disabled={loading || !privacyEnabled}
+                  />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="secondary" 
+                        size="icon" 
+                        className="h-9 w-9 shrink-0 rounded-xl bg-white text-black"
+                        disabled={loading || !input.trim() || !privacyEnabled}
+                        onClick={() => sendMessage(input)}
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">Execute Command</TooltipContent>
+                  </Tooltip>
                 </div>
-                <p className="text-sm text-muted-foreground">Start a conversation</p>
+                {!privacyEnabled && (
+                  <p className="text-[9px] text-amber-500/70 text-center mt-2 font-bold uppercase tracking-widest">
+                     System Locked: Enable Privacy Mode in settings to resume terminal access
+                  </p>
+                )}
               </div>
-            )}
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[80%] sm:max-w-[70%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                  msg.role === 'user'
-                    ? 'bg-primary text-primary-foreground rounded-br-sm'
-                    : 'bg-muted text-foreground rounded-bl-sm'
-                }`}>{msg.content}</div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-muted rounded-2xl rounded-bl-sm px-3.5 py-2.5">
-                  <div className="flex gap-1">
-                    <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce" />
-                    <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <div className="w-1.5 h-1.5 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:300ms]" />
+            </div>
+          </div>
+        )}
+
+        {/* ─── VOICE MODE ─── */}
+        {mode === 'voice' && (
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-pulse" />
+              
+              <div className="z-10 flex flex-col items-center gap-10">
+                <div className="text-center space-y-2">
+                   <p className="text-[10px] font-black uppercase tracking-[0.4em] text-primary/60">
+                    Neural Interface 0.1
+                  </p>
+                  <p className="text-xl font-bold tracking-tight">
+                    {listening ? 'Neural Stream Open' : 'Waiting for Signal'}
+                  </p>
+                </div>
+
+                <div 
+                   className={`relative cursor-pointer group transition-all duration-500 rounded-full p-1 border-2 ${
+                     listening ? 'border-primary shadow-[0_0_40px_rgba(108,92,231,0.3)]' : 'border-white/10'
+                   }`}
+                   onClick={toggleVoice}
+                >
+                  <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all bg-card/50 backdrop-blur-xl ${
+                    listening ? 'scale-90' : 'scale-100'
+                  }`}>
+                    {listening ? <MicOff className="h-10 w-10 text-primary" /> : <Mic className="h-10 w-10 text-muted-foreground" />}
+                    
+                    {/* Animated waves while listening */}
+                    {listening && (
+                      <div className="absolute inset-0 -z-10">
+                        <div className="absolute inset-0 rounded-full border border-primary animate-ping opacity-20" />
+                        <div className="absolute inset-2 rounded-full border border-primary animate-ping [animation-delay:0.3s] opacity-10" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {voiceText && (
+                  <p className="text-base font-medium italic text-foreground text-center max-w-sm animate-in fade-in slide-in-from-bottom-2 px-4 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                    "{voiceText}"
+                  </p>
+                )}
+
+                <div className="flex flex-col items-center gap-4 mt-4">
+                  <Button 
+                    variant={wakeRunning ? 'secondary' : 'outline'} 
+                    size="sm" 
+                    onClick={toggleWakeEngine}
+                    className={`h-9 px-6 gap-2 rounded-full border-white/10 text-[10px] uppercase font-black tracking-widest ${wakeRunning ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : ''}`}
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full ${wakeRunning ? 'bg-emerald-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
+                    {wakeRunning ? 'Neural Wake ACTIVE' : 'Init Wake Engine'}
+                  </Button>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <p className="text-[9px] text-muted-foreground uppercase font-medium tracking-widest">{wakeStatus}</p>
+                    <div className="w-32 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                      <div className="h-full bg-primary transition-all duration-150 shadow-[0_0_5px_var(--primary)]" style={{ width: `${wakeVolume}%` }} />
+                    </div>
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-          <div className="chat-input-bar">
-            <textarea
-              ref={textareaRef} value={input}
-              onChange={e => { setInput(e.target.value); autoResize(); }}
-              onKeyDown={handleKeyDown}
-              placeholder={privacyEnabled ? 'Message VORA...' : 'Enable Privacy Mode in Settings to chat'}
-              rows={1}
-              disabled={loading || !privacyEnabled}
-            />
-            <button onClick={() => sendMessage(input)} disabled={loading || !input.trim() || !privacyEnabled}
-              className="p-3 rounded-full bg-gradient-to-br from-[#6c5ce7] to-[#a29bfe] text-white disabled:opacity-30 transition-all hover:scale-105 active:scale-95 shrink-0">
-              <Send size={18} />
-            </button>
-          </div>
-        </>
-      )}
+            </div>
 
-      {/* ─── Voice ─── */}
-      {mode === 'voice' && (
-        <>
-          <div className="flex-1 flex flex-col items-center justify-center gap-6 p-6">
-            <p className="text-xs text-muted-foreground uppercase tracking-[0.2em] font-semibold">
-              {listening ? 'Listening...' : 'Tap to speak'}
-            </p>
-            <div className={`voice-orb ${listening ? 'listening' : ''}`} onClick={toggleVoice}>
-              {listening ? <MicOff size={40} className="text-white/90" /> : <Mic size={40} className="text-white/70" />}
-            </div>
-            {voiceText && <p className="text-sm italic text-white/50 text-center max-w-[260px]">"{voiceText}"</p>}
-            <button
-              onClick={toggleWakeEngine}
-              className={`px-3 py-1.5 rounded-lg text-[10px] uppercase tracking-widest border transition-all ${
-                wakeRunning
-                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
-                  : 'bg-white/5 border-white/15 text-white/45 hover:bg-white/10'
-              }`}
-            >
-              {wakeRunning ? 'Stop Wake Word' : 'Start Wake Word'}
-            </button>
-            <p className="text-[10px] text-white/25 text-center">{wakeStatus}</p>
-            <div className="w-[220px] h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-[#6c5ce7] to-[#a29bfe] transition-all duration-150"
-                style={{ width: `${wakeVolume}%` }}
-              />
-            </div>
-            <p className="text-[10px] text-white/20 uppercase tracking-widest">
-              Voice Adapter (Phase 1) • {sttSupported ? 'Web Speech STT ready' : 'STT unavailable'}
-            </p>
-          </div>
-          <div className="px-4 pb-2">
-            <p className="text-[10px] text-white/35 uppercase tracking-widest mb-2">Transcript Events</p>
-            <div className="max-h-[18vh] overflow-y-auto bg-white/5 border border-white/10 rounded-lg p-2">
-              {transcriptLog.length === 0 && (
-                <p className="text-[11px] text-white/30">No transcript events yet.</p>
-              )}
-              {transcriptLog.map((line, idx) => (
-                <p key={`${line}-${idx}`} className="text-[11px] text-white/55 font-mono leading-relaxed">{line}</p>
-              ))}
+            {/* Transcript Area */}
+            <div className="bg-card/30 border-t border-border/50 shrink-0">
+               <div className="max-w-xl mx-auto p-4">
+                 <div className="flex items-center justify-between mb-2">
+                   <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50">Terminal Stream</p>
+                   <Badge variant="outline" className="text-[8px] h-4">STT: {sttSupported ? 'Ready' : 'Inert'}</Badge>
+                 </div>
+                 <ScrollArea className="h-28 rounded-xl bg-black/20 border border-white/5 p-2">
+                    <div className="space-y-1">
+                      {transcriptLog.length === 0 && <p className="text-[10px] text-muted-foreground italic px-1">Neural channel empty...</p>}
+                      {transcriptLog.map((line, idx) => (
+                        <p key={idx} className="text-[10px] font-mono text-muted-foreground/80 leading-tight">
+                          <span className="text-primary/70 opacity-50">{line.slice(0, 8)}</span>
+                          <span className="ml-2">{line.slice(10)}</span>
+                        </p>
+                      ))}
+                    </div>
+                 </ScrollArea>
+               </div>
             </div>
           </div>
-          <ScrollArea className="max-h-[25vh] px-4 pb-3">
-            {messages.slice(-4).map((m, i) => (
-              <div key={i} className={`flex mb-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] px-3 py-2 rounded-xl text-xs ${
-                  m.role === 'user' ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                }`}>{m.content}</div>
+        )}
+      </main>
+
+      {/* ─── Security Confirmation Overlay ─── */}
+      {pendingConfirm && (
+        <div className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300">
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-card shadow-2xl p-6 space-y-5 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-destructive/10 flex items-center justify-center border border-destructive/20 text-destructive">
+                <Shield className="h-5 w-5" />
               </div>
-            ))}
-          </ScrollArea>
-        </>
+              <div className="flex flex-col">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-destructive/80">Security Protocol 402</p>
+                <h3 className="text-sm font-bold tracking-tight">Vora Requesting Approval</h3>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3.5 rounded-2xl bg-muted/30 border border-border space-y-1">
+                <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">Requested Action</p>
+                <p className="text-sm font-semibold">{pendingConfirm.action}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">{pendingConfirm.reason}</p>
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-red-400 bg-red-400/5 px-2 py-1 rounded-md border border-red-400/10 w-fit">
+                  <span className="uppercase">Risk Profile:</span> {pendingConfirm.risk}
+                </div>
+              </div>
+
+              {pendingConfirm.prompt_preview && (
+                <div className="rounded-2xl bg-black/30 border border-white/5 p-3">
+                   <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest mb-1 opacity-50">Operation Source</p>
+                   <p className="text-[10px] font-mono text-white/70 leading-relaxed whitespace-pre-wrap">{pendingConfirm.prompt_preview}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => resolveConfirm(false)}
+                className="flex-1 rounded-2xl h-12 uppercase tracking-widest font-black text-xs border-white/10 hover:bg-white/5"
+              >
+                Deny
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => resolveConfirm(true)}
+                className="flex-1 rounded-2xl h-12 uppercase tracking-widest font-black text-xs bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-500/20"
+              >
+                Allow Neural Access
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
