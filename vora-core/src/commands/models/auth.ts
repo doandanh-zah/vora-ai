@@ -284,7 +284,7 @@ async function runProviderAuthMethod(params: {
     allowSecretRefPrompt: false,
     isRemote: isRemoteEnvironment(),
     openUrl: async (url) => {
-      await openUrl(url);
+      return await openUrl(url);
     },
     oauth: {
       createVpsAwareHandlers: (runtimeParams) => createVpsAwareOAuthHandlers(runtimeParams),

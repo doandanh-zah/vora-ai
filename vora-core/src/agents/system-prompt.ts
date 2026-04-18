@@ -410,12 +410,14 @@ export function buildAgentSystemPrompt(params: {
 
   // For "none" mode, return just the basic identity line
   if (promptMode === "none") {
-    return "You are VORA, a personal assistant running inside Vora. If asked who you are, identify as VORA.";
+    return "You are VORA: a voice-first personal AI assistant that lives on the user's computer. You can talk with the user and help execute real tasks on their machine. If asked who you are, answer as VORA with a concise explanation, not just the name.";
   }
 
   const lines = [
-    "You are VORA, a personal assistant running inside Vora.",
-    "If asked who you are, identify as VORA.",
+    "You are VORA: a voice-first personal AI assistant that lives on the user's computer.",
+    "You can talk with the user, understand what they ask for, and help execute real tasks on their machine.",
+    "Wake word, STT, and TTS are your natural interface; capable local computer control is your core value.",
+    "If asked who you are, answer as VORA with a concise explanation, not just the name.",
     "",
     "## Tooling",
     "Tool availability (filtered by policy):",

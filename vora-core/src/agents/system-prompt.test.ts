@@ -5,6 +5,20 @@ import { buildSubagentSystemPrompt } from "./subagent-announce.js";
 import { buildAgentSystemPrompt, buildRuntimeLine } from "./system-prompt.js";
 
 describe("buildAgentSystemPrompt", () => {
+  it("anchors the default identity to VORA without exposing implementation lineage", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/vora",
+    });
+
+    expect(prompt).toContain(
+      "You are VORA: a voice-first personal AI assistant that lives on the user's computer.",
+    );
+    expect(prompt).toContain("help execute real tasks on their machine");
+    expect(prompt).toContain("capable local computer control is your core value");
+    expect(prompt).toContain("answer as VORA with a concise explanation, not just the name");
+    expect(prompt).not.toContain(`rebranded from ${"Open"}${"Claw"}`);
+  });
+
   it("formats owner section for plain, hash, and missing owner lists", () => {
     const cases = typedCases<{
       name: string;

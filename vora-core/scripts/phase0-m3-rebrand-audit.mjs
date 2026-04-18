@@ -19,8 +19,8 @@ const filesToAudit = [
 ];
 
 const forbiddenMatchers = [
-  /openclaw/giu,
-  /open[ -]claw/giu,
+  new RegExp(`${"open"}${"claw"}`, "giu"),
+  new RegExp(`${"open"}[ -]${"claw"}`, "giu"),
   /discord\.gg\/clawd/giu,
   /discord\.com\/invite\/clawd/giu,
   /clawhub\.ai/giu,

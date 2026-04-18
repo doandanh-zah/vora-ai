@@ -18,6 +18,11 @@ function readInt(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function readNumber(name, fallback) {
+  const value = Number.parseFloat(readText(name, String(fallback)));
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function readBool(name, fallback) {
   const value = readText(name, fallback ? "true" : "false").toLowerCase();
   if (value === "true" || value === "1" || value === "yes") {
@@ -63,5 +68,28 @@ export const config = {
     cluster: readText("SOLANA_CLUSTER", "devnet"),
     receiverAddress: readText("SOLANA_RECEIVER_ADDRESS", ""),
     verifyOnChain: readBool("SOLANA_VERIFY_ONCHAIN", false),
+  },
+  agora: {
+    appId: readText("AGORA_APP_ID", ""),
+    appCertificate: readText("AGORA_APP_CERTIFICATE", ""),
+    customerKey: readText("AGORA_CUSTOMER_KEY", ""),
+    customerSecret: readText("AGORA_CUSTOMER_SECRET", ""),
+    apiBase: readText("AGORA_API_BASE", "https://api.agora.io"),
+    tokenExpireSeconds: readInt("AGORA_TOKEN_EXPIRE_SECONDS", 3600),
+  },
+  hume: {
+    apiKey: readText("HUME_API_KEY", readText("VORA_HUME_API_KEY", "")),
+    secretKey: readText("HUME_SECRET_KEY", ""),
+    voiceId: readText("HUME_VOICE_ID", "9e068547-5ba4-4c8e-8e03-69282a008f04"),
+    speed: Math.max(0.5, Math.min(2, readNumber("HUME_SPEED", 1.2))),
+  },
+  elevenlabs: {
+    apiKey: readText("ELEVENLABS_API_KEY", readText("VORA_ELEVENLABS_API_KEY", "")),
+    voiceId: readText("ELEVENLABS_VOICE_ID", readText("VORA_ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")),
+    modelId: readText("ELEVENLABS_MODEL_ID", readText("VORA_ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")),
+    outputFormat: readText(
+      "ELEVENLABS_OUTPUT_FORMAT",
+      readText("VORA_ELEVENLABS_OUTPUT_FORMAT", "mp3_44100_128"),
+    ),
   },
 };

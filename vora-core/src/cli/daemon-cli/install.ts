@@ -1,5 +1,8 @@
 import { resolveNodeStartupTlsEnvironment } from "../../bootstrap/node-startup-env.js";
-import { buildGatewayInstallPlan } from "../../commands/daemon-install-helpers.js";
+import {
+  buildGatewayInstallPlan,
+  gatewayServiceNeedsCurrentInstallRefresh,
+} from "../../commands/daemon-install-helpers.js";
 import {
   DEFAULT_GATEWAY_DAEMON_RUNTIME,
   isGatewayDaemonRuntime,
@@ -76,7 +79,32 @@ export async function runDaemonInstall(opts: DaemonInstallOptions) {
   });
   if (loaded) {
     if (!opts.force) {
-      if (await gatewayServiceNeedsAutoNodeExtraCaCertsRefresh({ service, env: process.env })) {
+      const currentInstallRefresh = await gatewayServiceNeedsCurrentInstallRefresh({
+        service,
+        env: installEnv,
+        port,
+        runtime: runtimeRaw,
+        config: cfg,
+        warn: (message) => {
+          if (json) {
+            warnings.push(message);
+          } else {
+            defaultRuntime.log(message);
+          }
+        },
+      });
+      const needsCaRefresh = await gatewayServiceNeedsAutoNodeExtraCaCertsRefresh({
+        service,
+        env: process.env,
+      });
+      if (currentInstallRefresh.needed) {
+        const message = `Gateway service install is stale (${currentInstallRefresh.reason}); refreshing the install.`;
+        if (json) {
+          warnings.push(message);
+        } else {
+          defaultRuntime.log(message);
+        }
+      } else if (needsCaRefresh) {
         const message = "Gateway service is missing the nvm TLS CA bundle; refreshing the install.";
         if (json) {
           warnings.push(message);

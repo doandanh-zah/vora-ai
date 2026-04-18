@@ -4,8 +4,11 @@ import { config } from "./config.js";
 import { BackendStore } from "./lib/store.js";
 import { createAuthRouter } from "./routes/auth.routes.js";
 import { createActionsRouter } from "./routes/actions.routes.js";
+import { createAgoraRouter } from "./routes/agora.routes.js";
 import { createCreditsRouter } from "./routes/credits.routes.js";
 import { createPaymentsRouter } from "./routes/payments.routes.js";
+import { createIntegrationsRouter } from "./routes/integrations.routes.js";
+import { createTtsRouter } from "./routes/tts.routes.js";
 
 async function bootstrap() {
   const app = express();
@@ -27,6 +30,16 @@ async function bootstrap() {
       ts: new Date().toISOString(),
       solanaCluster: config.solana.cluster,
       verifyOnChain: config.solana.verifyOnChain,
+      voiceProviders: {
+        agora: Boolean(
+          config.agora.appId &&
+            config.agora.appCertificate &&
+            config.agora.customerKey &&
+            config.agora.customerSecret,
+        ),
+        hume: Boolean(config.hume.apiKey),
+        elevenlabs: Boolean(config.elevenlabs.apiKey),
+      },
     });
   });
 
@@ -40,6 +53,12 @@ async function bootstrap() {
         "POST /api/auth/refresh",
         "POST /api/auth/logout",
         "GET  /api/auth/me",
+        "GET  /api/agora/token",
+        "POST /api/agora/token",
+        "POST /api/agora/stt/start",
+        "POST /api/agora/stt/stop",
+        "POST /api/tts/hume",
+        "POST /api/tts/elevenlabs",
         "POST /api/actions",
         "GET  /api/actions/mine",
         "GET  /api/credits/balance",
@@ -53,9 +72,12 @@ async function bootstrap() {
   });
 
   app.use("/api/auth", createAuthRouter({ config, store }));
+  app.use("/api/agora", createAgoraRouter({ config }));
+  app.use("/api/tts", createTtsRouter({ config }));
   app.use("/api/actions", createActionsRouter({ config, store }));
   app.use("/api/credits", createCreditsRouter({ config, store }));
   app.use("/api/payments", createPaymentsRouter({ config, store }));
+  app.use("/api", createIntegrationsRouter({ config }));
 
   app.use((err, _req, res, _next) => {
     // eslint-disable-next-line no-console

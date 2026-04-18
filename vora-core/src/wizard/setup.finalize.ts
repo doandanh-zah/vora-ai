@@ -5,6 +5,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import {
   buildGatewayInstallPlan,
   gatewayInstallErrorHint,
+  gatewayServiceNeedsCurrentInstallRefresh,
 } from "../commands/daemon-install-helpers.js";
 import {
   DEFAULT_GATEWAY_DAEMON_RUNTIME,
@@ -141,14 +142,43 @@ export async function finalizeSetupWizard(
     const loaded = await service.isLoaded({ env: process.env });
     let restartWasScheduled = false;
     if (loaded) {
-      const action = await prompter.select({
-        message: "Gateway service already installed",
-        options: [
-          { value: "restart", label: "Restart" },
-          { value: "reinstall", label: "Reinstall" },
-          { value: "skip", label: "Skip" },
-        ],
+      const installRefresh = await gatewayServiceNeedsCurrentInstallRefresh({
+        service,
+        env: process.env,
+        port: settings.port,
+        runtime: daemonRuntime,
+        config: nextConfig,
       });
+      let action: "restart" | "reinstall" | "skip";
+      if (installRefresh.needed && flow === "quickstart") {
+        await prompter.note(
+          `Installed Gateway is stale (${installRefresh.reason}). Reinstalling so the background service uses this VORA version.`,
+          "Gateway service",
+        );
+        action = "reinstall";
+      } else {
+        action = await prompter.select({
+          message: installRefresh.needed
+            ? "Gateway service already installed but needs refresh"
+            : "Gateway service already installed",
+          options: installRefresh.needed
+            ? [
+                {
+                  value: "reinstall",
+                  label: "Reinstall",
+                  hint: installRefresh.reason,
+                },
+                { value: "restart", label: "Restart old install" },
+                { value: "skip", label: "Skip" },
+              ]
+            : [
+                { value: "restart", label: "Restart" },
+                { value: "reinstall", label: "Reinstall" },
+                { value: "skip", label: "Skip" },
+              ],
+          initialValue: installRefresh.needed ? "reinstall" : "restart",
+        });
+      }
       if (action === "restart") {
         let restartDoneMessage = "Gateway service restarted.";
         await withWizardProgress(
@@ -394,7 +424,7 @@ export async function finalizeSetupWizard(
   let controlUiOpened = false;
   let controlUiOpenHint: string | undefined;
   let seededInBackground = false;
-  let hatchChoice: "tui" | "later" | null = null;
+  let hatchChoice: "voice" | "tui" | "web" | "later" | null = null;
   let launchedTui = false;
 
   if (!opts.skipUi && gatewayProbe.ok) {
@@ -404,9 +434,9 @@ export async function finalizeSetupWizard(
           "This is the defining action that makes your agent you.",
           "Please take your time.",
           "The more you tell it, the better the experience will be.",
-          'We will send: "Wake up, my friend!"',
+          'Voice/TUI hatch will send: "Wake up, my friend!"',
         ].join("\n"),
-        "Start TUI (best option!)",
+        "Start VORA",
       );
     }
 
@@ -423,16 +453,51 @@ export async function finalizeSetupWizard(
       "Token",
     );
 
+    const voiceHatchEnabled = flow === "quickstart" && !opts.skipVoice;
     hatchChoice = await prompter.select({
       message: "How do you want to hatch your bot?",
       options: [
-        { value: "tui", label: "Hatch in TUI (best option!)" },
+        ...(voiceHatchEnabled
+          ? [
+              {
+                value: "voice" as const,
+                label: "Hatch with Voice (wake word + STT + TTS)",
+              },
+            ]
+          : []),
+        { value: "tui", label: "Hatch in TUI" },
+        { value: "web", label: "Open the Web UI" },
         { value: "later", label: "Do this later" },
       ],
-      initialValue: "tui",
+      initialValue: voiceHatchEnabled ? "voice" : "tui",
     });
 
-    if (hatchChoice === "tui") {
+    if (hatchChoice === "voice") {
+      restoreTerminalState("pre-setup voice", { resumeStdinIfPaused: true });
+      try {
+        const { runVoiceLoop } = await import("../cli/voice-cli.js");
+        await runVoiceLoop({
+          url: links.wsUrl,
+          token:
+            settings.authMode === "token" ? settings.gatewayToken : undefined,
+          password:
+            settings.authMode === "password" ? resolvedGatewayPassword : "",
+          deliver: false,
+          message: hasBootstrap ? "Wake up, my friend!" : undefined,
+        });
+        launchedTui = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await prompter.note(
+          [
+            `Voice hatch failed: ${message}`,
+            `Check: ${formatCliCommand("vora voice doctor --json")}`,
+            `Fallback: ${formatCliCommand("vora tui")}`,
+          ].join("\n"),
+          "Voice hatch",
+        );
+      }
+    } else if (hatchChoice === "tui") {
       restoreTerminalState("pre-setup tui", { resumeStdinIfPaused: true });
       await runTui({
         url: links.wsUrl,
@@ -445,9 +510,13 @@ export async function finalizeSetupWizard(
         message: hasBootstrap ? "Wake up, my friend!" : undefined,
       });
       launchedTui = true;
-    } else {
+    } else if (hatchChoice === "later") {
       await prompter.note(
-        `When you're ready: ${formatCliCommand("vora dashboard --no-open")}`,
+        [
+          `Voice mode: ${formatCliCommand("vora voice")}`,
+          `TUI fallback: ${formatCliCommand("vora tui")}`,
+          `Dashboard: ${formatCliCommand("vora dashboard --no-open")}`,
+        ].join("\n"),
         "Later",
       );
     }
@@ -475,7 +544,7 @@ export async function finalizeSetupWizard(
     gatewayProbe.ok &&
     settings.authMode === "token" &&
     Boolean(settings.gatewayToken) &&
-    hatchChoice === null;
+    (hatchChoice === null || hatchChoice === "web");
   if (shouldOpenControlUi) {
     const browserSupport = await detectBrowserOpenSupport();
     if (browserSupport.ok) {

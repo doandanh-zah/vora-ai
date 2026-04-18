@@ -13,7 +13,6 @@ Users simply say **“Hey VORA”**, speak naturally, and VORA executes actions 
 ## Product Overview
 
 ### Mental model
-- **OpenClaw** is the underlying engine.
 - **VORA** is the user-facing product layer.
 - The goal is not to build a chatbot.
 - The goal is to build a truly capable agent with simple, voice-first UX.
@@ -139,9 +138,9 @@ Mic
 
 - **Desktop:** Tauri
 - **Wake word:** openWakeWord
-- **Voice pipeline:** Agora Conversational AI (VAD + STT + TTS)
+- **Voice pipeline:** local wake word + Agora STT + ElevenLabs TTS
 - **Browser automation:** Playwright
-- **Agent architecture direction:** inspired by OpenClaw
+- **Agent architecture direction:** local-first personal agent runtime
 - **Landing page:** Next.js + Vercel
 - **Waitlist:** Tally.so (MVP)
 

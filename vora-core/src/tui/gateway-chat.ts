@@ -33,6 +33,13 @@ export type ChatSendOptions = {
   message: string;
   thinking?: string;
   deliver?: boolean;
+  attachments?: Array<{
+    type?: string;
+    mimeType?: string;
+    fileName?: string;
+    content?: unknown;
+    source?: unknown;
+  }>;
   timeoutMs?: number;
   runId?: string;
 };
@@ -213,6 +220,7 @@ export class GatewayChatClient {
       message: opts.message,
       thinking: opts.thinking,
       deliver: opts.deliver,
+      attachments: opts.attachments,
       timeoutMs: opts.timeoutMs,
       idempotencyKey: runId,
     });

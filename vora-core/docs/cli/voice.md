@@ -11,9 +11,25 @@ title: "voice"
 Wake-word terminal loop:
 
 - OpenWakeWord (`wake_word/main.py`) listens for trigger
-- STT adapter captures one command transcript
+- STT adapter captures the first command transcript, then a short follow-up window
+  keeps the spoken conversation going without repeating the wake word
 - Transcript is sent to Gateway via `chat.send`
 - Assistant reply is printed, optional Hume TTS playback
+
+The Agora STT bridge prints a clear readiness cue before every capture:
+
+```text
+✓ Listening now (en-US). Speak now.
+```
+
+Wait for that line, or the terminal beep, before speaking. The follow-up timer
+starts after this readiness signal, not while the browser/microphone bridge is
+still starting.
+
+After the wake word, VORA uses a local instant acknowledgement by default so it
+does not spend a model request before opening STT. Use `--wake-ack agent` only
+when you explicitly want the old behavior of sending `Hey Vora!` to the Gateway
+before listening.
 
 ## Commands
 
@@ -25,8 +41,14 @@ vora voice doctor
 ## Core options
 
 - `--stt-provider <manual|agora>`: choose STT input path.
-- `--tts-provider <none|hume>`: choose reply voice playback.
+- `--stt-lang <lang>`: STT language list. Default is `en-US`.
+- `--tts-provider <none|hume|elevenlabs>`: choose reply voice playback.
+- `--debug`: show low-level voice diagnostics, including mic levels and run IDs.
+- `--wake-ack <local|agent|off>`: wake acknowledgement mode. Default is `local`
+  for the lowest wake-to-STT latency.
 - `--once`: stop after one successful wake -> reply turn.
+- `--no-follow-up`: require wake word before every turn.
+- `--follow-up-max-turns <n>`: cap spoken follow-ups before re-arming wake word.
 - `--wake-dir <path>`, `--wake-model <path>`, `--wake-threshold <0..1>`.
 - `--session <key>`, `--url`, `--token`, `--password` for Gateway target/session.
 
@@ -46,6 +68,7 @@ After wake trigger, type transcript into terminal.
 
 - `scripts/agora-stt-bridge.mjs`
 - supports placeholders `{lang}` and `{timeout_ms}` in custom commands
+- defaults to `en-US`. Beta voice mode expects English speech for the most reliable STT.
 
 Required env for bundled bridge:
 
@@ -60,20 +83,44 @@ Common optional env:
 - `VORA_AGORA_UID`
 - `VORA_AGORA_STT_BOT_UID`
 - `VORA_AGORA_API_BASE`
+- `VORA_AGORA_STT_BROWSER_USER_DATA_DIR`: persistent hidden browser profile.
+  Default is `~/.vora/agora-stt-browser`, which caches the Agora SDK/protobuf
+  assets and microphone permission so the second and later wake turns start
+  faster.
+
+Use English-only mode for the current beta:
+
+```bash
+vora voice --stt-provider agora --stt-lang en-US
+```
 
 ## Hume TTS
 
-To speak assistant replies:
+By default, `vora voice` uses the VORA backend for Hume TTS, so local Hume keys
+are not required for normal installs. Hume speed defaults to `1.2`.
 
 ```bash
-export VORA_HUME_API_KEY=...
 vora voice --stt-provider manual --tts-provider hume
 ```
 
 Optional:
 
-- `VORA_HUME_VOICE_ID`
-- or `--hume-voice-id <id>`
+- `VORA_HUME_API_KEY` / `HUME_API_KEY` for direct local mode
+- `VORA_HUME_VOICE_ID` / `HUME_VOICE_ID`
+- `VORA_HUME_SPEED` / `HUME_SPEED`
+- or the matching `--hume-*` CLI flags
+
+`elevenlabs` remains accepted as a compatibility provider, but it is not the
+default terminal voice path.
+
+## Screen Memory
+
+Say a phrase like `Hey VORA, remember what I am doing now`.
+
+VORA captures the current screen, sends it as an image attachment to the active
+model, and writes a short memory under `~/.vora/workspace/memory/voice-screen`.
+It also updates `~/.vora/workspace/HEARTBEAT.md` so the next Gateway startup can
+briefly remind you what it last saw and ask if you want help continuing.
 
 ## Health checks
 
