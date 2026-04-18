@@ -11,9 +11,10 @@ title: "voice"
 Wake-word terminal loop:
 
 - OpenWakeWord (`wake_word/main.py`) listens for trigger
-- STT adapter captures one command transcript
+- STT adapter captures the first command transcript, then a short follow-up window
+  keeps the spoken conversation going without repeating the wake word
 - Transcript is sent to Gateway via `chat.send`
-- Assistant reply is printed, optional ElevenLabs TTS playback
+- Assistant reply is printed, optional Hume TTS playback
 
 ## Commands
 
@@ -25,8 +26,10 @@ vora voice doctor
 ## Core options
 
 - `--stt-provider <manual|agora>`: choose STT input path.
-- `--tts-provider <none|elevenlabs>`: choose reply voice playback.
+- `--tts-provider <none|hume|elevenlabs>`: choose reply voice playback.
 - `--once`: stop after one successful wake -> reply turn.
+- `--no-follow-up`: require wake word before every turn.
+- `--follow-up-max-turns <n>`: cap spoken follow-ups before re-arming wake word.
 - `--wake-dir <path>`, `--wake-model <path>`, `--wake-threshold <0..1>`.
 - `--session <key>`, `--url`, `--token`, `--password` for Gateway target/session.
 
@@ -61,21 +64,33 @@ Common optional env:
 - `VORA_AGORA_STT_BOT_UID`
 - `VORA_AGORA_API_BASE`
 
-## ElevenLabs TTS
+## Hume TTS
 
-To speak assistant replies:
+By default, `vora voice` uses the VORA backend for Hume TTS, so local Hume keys
+are not required for normal installs. Hume speed defaults to `1.2`.
 
 ```bash
-export VORA_ELEVENLABS_API_KEY=...
-vora voice --stt-provider manual --tts-provider elevenlabs
+vora voice --stt-provider manual --tts-provider hume
 ```
 
 Optional:
 
-- `VORA_ELEVENLABS_VOICE_ID`
-- `VORA_ELEVENLABS_MODEL_ID`
-- `VORA_ELEVENLABS_OUTPUT_FORMAT`
-- or the matching `--eleven-labs-*` CLI flags
+- `VORA_HUME_API_KEY` / `HUME_API_KEY` for direct local mode
+- `VORA_HUME_VOICE_ID` / `HUME_VOICE_ID`
+- `VORA_HUME_SPEED` / `HUME_SPEED`
+- or the matching `--hume-*` CLI flags
+
+`elevenlabs` remains accepted as a compatibility provider, but it is not the
+default terminal voice path.
+
+## Screen Memory
+
+Say a phrase like `Hey VORA, remember what I am doing now`.
+
+VORA captures the current screen, sends it as an image attachment to the active
+model, and writes a short memory under `~/.vora/workspace/memory/voice-screen`.
+It also updates `~/.vora/workspace/HEARTBEAT.md` so the next Gateway startup can
+briefly remind you what it last saw and ask if you want help continuing.
 
 ## Health checks
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 const humeSchema = z.object({
   text: z.string().min(1).max(4000),
   voiceId: z.string().min(1).max(200).optional(),
+  speed: z.number().min(0.5).max(2).optional(),
 });
 
 const elevenLabsSchema = z.object({
@@ -59,12 +60,13 @@ export function createTtsRouter({ config }) {
               voice: {
                 id: parsed.data.voiceId || config.hume.voiceId,
               },
-              speed: 1.0,
+              speed: parsed.data.speed ?? config.hume.speed,
             },
           ],
           format: {
             type: "mp3",
           },
+          num_generations: 1,
         }),
       });
 

@@ -73,12 +73,13 @@ export function createIntegrationsRouter({ config }) {
   });
 
   router.get("/tts/hume", async (_req, res) => {
-    const configured = Boolean(config.hume.apiKey && config.hume.secretKey);
+    const configured = Boolean(config.hume.apiKey);
     res.json({
       ok: configured,
       provider: "hume",
       configured,
-      note: configured ? "Credentials configured" : "Missing HUME_API_KEY/HUME_SECRET_KEY",
+      speed: config.hume.speed,
+      note: configured ? "Credentials configured" : "Missing HUME_API_KEY",
       requestId: crypto.randomUUID(),
     });
   });

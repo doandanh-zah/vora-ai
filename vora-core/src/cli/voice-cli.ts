@@ -6,6 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import type { Command } from "commander";
+import {
+  DEFAULT_HEARTBEAT_FILENAME,
+  resolveDefaultAgentWorkspaceDir,
+} from "../agents/workspace.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { formatDocsLink } from "../terminal/links.js";
 import { theme } from "../terminal/theme.js";
@@ -13,7 +17,20 @@ import { GatewayChatClient } from "../tui/gateway-chat.js";
 import { parseTimeoutMs } from "./parse-timeout.js";
 
 type VoiceSttProvider = "manual" | "agora";
-type VoiceTtsProvider = "none" | "elevenlabs";
+type VoiceTtsProvider = "none" | "hume" | "elevenlabs";
+
+type VoiceAttachment = {
+  type?: string;
+  mimeType?: string;
+  fileName?: string;
+  content?: unknown;
+  source?: unknown;
+};
+
+type VoiceConversationState = {
+  lastUser?: string;
+  lastAssistant?: string;
+};
 
 type VoiceRootOptions = {
   url?: string;
@@ -36,10 +53,18 @@ type VoiceRootOptions = {
   agoraSttCommand?: string;
   backendUrl?: string;
   ttsProvider?: string;
+  ttsTimeoutMs?: string;
+  humeApiKey?: string;
+  humeVoiceId?: string;
+  humeSpeed?: string;
   elevenLabsApiKey?: string;
   elevenLabsVoiceId?: string;
   elevenLabsModelId?: string;
   elevenLabsOutputFormat?: string;
+  followUp?: boolean;
+  followUpMs?: string;
+  followUpMaxTurns?: string;
+  followUpSttTimeoutMs?: string;
 };
 
 type VoiceDoctorOptions = Omit<VoiceRootOptions, "deliver" | "thinking" | "once"> & {
@@ -80,10 +105,20 @@ type VoiceRuntimeOptions = {
   tts: {
     provider: VoiceTtsProvider;
     backendUrl?: string;
+    timeoutMs: number;
+    humeApiKey?: string;
+    humeVoiceId: string;
+    humeSpeed: number;
     elevenLabsApiKey?: string;
     elevenLabsVoiceId: string;
     elevenLabsModelId: string;
     elevenLabsOutputFormat: string;
+  };
+  conversation: {
+    followUpEnabled: boolean;
+    followUpMs: number;
+    followUpMaxTurns: number;
+    followUpSttTimeoutMs: number;
   };
   once: boolean;
 };
@@ -110,10 +145,17 @@ const DEFAULT_WAKE_THRESHOLD = 0.5;
 const DEFAULT_WAIT_MS = 40_000;
 const DEFAULT_STT_TIMEOUT_MS = 25_000;
 const DEFAULT_STT_LANGUAGE = "en-US,vi-VN";
+const DEFAULT_HUME_VOICE_ID = "9e068547-5ba4-4c8e-8e03-69282a008f04";
+const DEFAULT_HUME_SPEED = 1.2;
+const DEFAULT_TTS_TIMEOUT_MS = 20_000;
+const DEFAULT_TTS_MAX_CHARS = 900;
 const DEFAULT_ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb";
 const DEFAULT_ELEVENLABS_MODEL_ID = "eleven_multilingual_v2";
 const DEFAULT_ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
 const DEFAULT_VOICE_BACKEND_URL = "https://vora-ai-backend-uemj.onrender.com";
+const DEFAULT_FOLLOW_UP_MS = 45_000;
+const DEFAULT_FOLLOW_UP_MAX_TURNS = 4;
+const DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS = 12_000;
 const DEFAULT_BACKEND_PROBE_TIMEOUT_MS = 60_000;
 const DEFAULT_BACKEND_STT_PROBE_TIMEOUT_MS = 60_000;
 const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 60_000;
@@ -179,7 +221,9 @@ function resolveVenvPythonCandidates(venvDir = resolveVoiceVenvDir()): string[] 
 
 function resolveVenvPythonBin(venvDir = resolveVoiceVenvDir()): string {
   const candidates = resolveVenvPythonCandidates(venvDir);
-  return candidates.find((candidate) => commandSucceeds(candidate, ["--version"])) ?? candidates[0]!;
+  return (
+    candidates.find((candidate) => commandSucceeds(candidate, ["--version"])) ?? candidates[0]!
+  );
 }
 
 function resolveVoiceBackendUrl(explicitBackendUrl?: string): string | undefined {
@@ -211,6 +255,30 @@ function parseMs(raw: unknown, fallback: number): number {
   return parsed && parsed > 0 ? parsed : fallback;
 }
 
+function parseBoundedNumber(raw: unknown, fallback: number, min: number, max: number): number {
+  const text = trimToUndefined(raw);
+  if (!text) {
+    return fallback;
+  }
+  const parsed = Number.parseFloat(text);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function parseBoundedInt(raw: unknown, fallback: number, min: number, max: number): number {
+  const text = trimToUndefined(raw);
+  if (!text) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(text, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
 function parseSttProvider(
   raw: string | undefined,
   agoraCommand: string | undefined,
@@ -223,12 +291,20 @@ function parseSttProvider(
   return agoraCommand || backendUrl ? "agora" : "manual";
 }
 
-function parseTtsProvider(raw: string | undefined, apiKey: string | undefined, backendUrl: string | undefined): VoiceTtsProvider {
-  const value = raw?.trim().toLowerCase();
-  if (value === "none" || value === "elevenlabs") {
+function parseTtsProvider(params: {
+  raw: string | undefined;
+  humeApiKey: string | undefined;
+  elevenLabsApiKey: string | undefined;
+  backendUrl: string | undefined;
+}): VoiceTtsProvider {
+  const value = params.raw?.trim().toLowerCase();
+  if (value === "none" || value === "hume" || value === "elevenlabs") {
     return value;
   }
-  return apiKey || backendUrl ? "elevenlabs" : "none";
+  if (params.humeApiKey || params.backendUrl) {
+    return "hume";
+  }
+  return params.elevenLabsApiKey ? "elevenlabs" : "none";
 }
 
 function detectPythonBinary(explicitPython?: string): string | null {
@@ -316,7 +392,7 @@ function checkWakePythonDependencies(pythonBin: string): {
           ? `missing ${missing.join(", ")}`
           : timedOut
             ? `dependency probe timed out after ${String(WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS)}ms`
-          : stderr || `dependency probe failed with exit ${String(result.status)}`,
+            : stderr || `dependency probe failed with exit ${String(result.status)}`,
     };
   } catch (error) {
     return {
@@ -336,10 +412,7 @@ function formatWakePythonDependencyError(pythonBin: string, message: string): st
 }
 
 function onlyMissingOpenWakeWordResources(missing: string[]): boolean {
-  return (
-    missing.length > 0 &&
-    missing.every((entry) => entry.startsWith("openwakeword resource "))
-  );
+  return missing.length > 0 && missing.every((entry) => entry.startsWith("openwakeword resource "));
 }
 
 function detectWakeDir(explicitWakeDir?: string): string {
@@ -378,15 +451,20 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
   const bundledAgoraCommand =
     sttProvider === "agora" ? buildBundledAgoraBridgeCommand(backendUrl) : undefined;
   const agoraSttCommand = explicitAgoraCommand ?? bundledAgoraCommand;
+  const humeApiKey =
+    trimToUndefined(opts.humeApiKey) ??
+    trimToUndefined(process.env.VORA_HUME_API_KEY) ??
+    trimToUndefined(process.env.HUME_API_KEY);
   const elevenLabsApiKey =
     trimToUndefined(opts.elevenLabsApiKey) ??
     trimToUndefined(process.env.VORA_ELEVENLABS_API_KEY) ??
     trimToUndefined(process.env.ELEVENLABS_API_KEY);
-  const ttsProvider = parseTtsProvider(
-    trimToUndefined(opts.ttsProvider) ?? trimToUndefined(process.env.VORA_VOICE_TTS_PROVIDER),
+  const ttsProvider = parseTtsProvider({
+    raw: trimToUndefined(opts.ttsProvider) ?? trimToUndefined(process.env.VORA_VOICE_TTS_PROVIDER),
+    humeApiKey,
     elevenLabsApiKey,
     backendUrl,
-  );
+  });
 
   return {
     gateway: {
@@ -418,6 +496,21 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
     tts: {
       provider: ttsProvider,
       backendUrl,
+      timeoutMs: parseMs(opts.ttsTimeoutMs, DEFAULT_TTS_TIMEOUT_MS),
+      humeApiKey,
+      humeVoiceId:
+        trimToUndefined(opts.humeVoiceId) ??
+        trimToUndefined(process.env.VORA_HUME_VOICE_ID) ??
+        trimToUndefined(process.env.HUME_VOICE_ID) ??
+        DEFAULT_HUME_VOICE_ID,
+      humeSpeed: parseBoundedNumber(
+        trimToUndefined(opts.humeSpeed) ??
+          trimToUndefined(process.env.VORA_HUME_SPEED) ??
+          trimToUndefined(process.env.HUME_SPEED),
+        DEFAULT_HUME_SPEED,
+        0.5,
+        2,
+      ),
       elevenLabsApiKey,
       elevenLabsVoiceId:
         trimToUndefined(opts.elevenLabsVoiceId) ??
@@ -434,6 +527,12 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
         trimToUndefined(process.env.VORA_ELEVENLABS_OUTPUT_FORMAT) ??
         trimToUndefined(process.env.ELEVENLABS_OUTPUT_FORMAT) ??
         DEFAULT_ELEVENLABS_OUTPUT_FORMAT,
+    },
+    conversation: {
+      followUpEnabled: opts.followUp !== false,
+      followUpMs: parseMs(opts.followUpMs, DEFAULT_FOLLOW_UP_MS),
+      followUpMaxTurns: parseBoundedInt(opts.followUpMaxTurns, DEFAULT_FOLLOW_UP_MAX_TURNS, 0, 25),
+      followUpSttTimeoutMs: parseMs(opts.followUpSttTimeoutMs, DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS),
     },
     once: Boolean(opts.once),
   };
@@ -472,7 +571,11 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
   }
 }
 
-async function postJsonWithTimeout(url: string, body: unknown, timeoutMs: number): Promise<unknown> {
+async function postJsonWithTimeout(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -505,7 +608,10 @@ async function postJsonWithTimeout(url: string, body: unknown, timeoutMs: number
   }
 }
 
-function backendProviderStatus(payload: unknown, provider: "agora" | "elevenlabs"): boolean | undefined {
+function backendProviderStatus(
+  payload: unknown,
+  provider: "agora" | "hume" | "elevenlabs",
+): boolean | undefined {
   if (!payload || typeof payload !== "object") {
     return undefined;
   }
@@ -678,7 +784,9 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
           key: "agora_customer_secret",
           label: "Agora customer secret",
           ok: Boolean(trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET)),
-          message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET) ? "configured" : "missing",
+          message: trimToUndefined(process.env.VORA_AGORA_CUSTOMER_SECRET)
+            ? "configured"
+            : "missing",
         });
       }
       checks.push({
@@ -707,7 +815,56 @@ async function runVoiceDoctor(opts: VoiceDoctorOptions) {
     });
   }
 
-  if (resolved.tts.provider === "elevenlabs") {
+  if (resolved.tts.provider === "hume") {
+    if (resolved.tts.backendUrl) {
+      let humeReady = backendProviderStatus(backendHealth, "hume");
+      if (humeReady === undefined) {
+        try {
+          const humeStatus = await fetchJsonWithTimeout(
+            `${resolved.tts.backendUrl}/api/tts/hume`,
+            DEFAULT_BACKEND_PROBE_TIMEOUT_MS,
+          );
+          const configured =
+            humeStatus &&
+            typeof humeStatus === "object" &&
+            (humeStatus as { configured?: unknown; ok?: unknown }).configured === true;
+          humeReady = configured || (humeStatus as { ok?: unknown })?.ok === true;
+        } catch {
+          humeReady = undefined;
+        }
+      }
+      checks.push({
+        key: "backend_hume",
+        label: "backend Hume",
+        ok: backendHealthOk && humeReady === true,
+        message:
+          humeReady === true
+            ? `configured on backend (speed=${resolved.tts.humeSpeed})`
+            : humeReady === false
+              ? "backend is missing Hume env"
+              : "backend health does not expose Hume status",
+      });
+    } else {
+      checks.push({
+        key: "hume_api_key",
+        label: "Hume API key",
+        ok: Boolean(resolved.tts.humeApiKey),
+        message: resolved.tts.humeApiKey ? "configured" : "missing VORA_HUME_API_KEY/HUME_API_KEY",
+      });
+    }
+    checks.push({
+      key: "hume_voice_id",
+      label: "Hume voice id",
+      ok: Boolean(resolved.tts.humeVoiceId),
+      message: resolved.tts.humeVoiceId,
+    });
+    checks.push({
+      key: "hume_speed",
+      label: "Hume speed",
+      ok: resolved.tts.humeSpeed >= 0.5 && resolved.tts.humeSpeed <= 2,
+      message: String(resolved.tts.humeSpeed),
+    });
+  } else if (resolved.tts.provider === "elevenlabs") {
     if (resolved.tts.backendUrl) {
       const elevenLabsReady = backendProviderStatus(backendHealth, "elevenlabs");
       checks.push({
@@ -991,7 +1148,10 @@ function resolveShellCommand(command: string): { bin: string; args: string[] } {
   };
 }
 
-async function runShellCommand(command: string, timeoutMs: number): Promise<{
+async function runShellCommand(
+  command: string,
+  timeoutMs: number,
+): Promise<{
   code: number;
   stdout: string;
   stderr: string;
@@ -1104,7 +1264,9 @@ function brewFormulaInstalled(formula: string): boolean {
   return result.status === 0 && String(result.stdout ?? "").trim().length > 0;
 }
 
-async function ensureMacVoiceBuildDependencies(runtime: RuntimeEnv = defaultRuntime): Promise<void> {
+async function ensureMacVoiceBuildDependencies(
+  runtime: RuntimeEnv = defaultRuntime,
+): Promise<void> {
   if (process.platform !== "darwin" || !commandSucceeds("brew", ["--version"])) {
     return;
   }
@@ -1159,9 +1321,7 @@ export async function runVoiceSetup(
   let venvPython = resolveVenvPythonBin(venvDir);
   const venvExists = existsSync(venvDir);
   const venvPythonWorks = commandSucceeds(venvPython, ["--version"]);
-  const existingDeps = venvPythonWorks
-    ? checkWakePythonDependencies(venvPython)
-    : undefined;
+  const existingDeps = venvPythonWorks ? checkWakePythonDependencies(venvPython) : undefined;
   if (
     venvExists &&
     (!venvPythonWorks ||
@@ -1223,9 +1383,12 @@ function extractTranscriptFromCommandOutput(rawOutput: string): string {
   return trimmed;
 }
 
-async function transcribeSpeech(resolved: VoiceRuntimeOptions): Promise<string> {
+async function transcribeSpeech(
+  resolved: VoiceRuntimeOptions,
+  opts?: { timeoutMs?: number; prompt?: string },
+): Promise<string> {
   if (resolved.stt.provider === "manual") {
-    return (await promptLine("Say command (type transcript): ")).trim();
+    return (await promptLine(opts?.prompt ?? "Say command (type transcript): ")).trim();
   }
 
   const command = resolved.stt.agoraCommand;
@@ -1234,14 +1397,12 @@ async function transcribeSpeech(resolved: VoiceRuntimeOptions): Promise<string> 
       "Agora STT provider selected but no bridge command is available. Set --agora-stt-command or VORA_AGORA_STT_COMMAND.",
     );
   }
+  const timeoutMs = opts?.timeoutMs ?? resolved.stt.timeoutMs;
   const rendered = applyTemplate(command, {
     lang: resolved.stt.language,
-    timeout_ms: String(resolved.stt.timeoutMs),
+    timeout_ms: String(timeoutMs),
   });
-  const result = await runShellCommand(
-    rendered,
-    resolved.stt.timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS,
-  );
+  const result = await runShellCommand(rendered, timeoutMs + DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS);
   if (result.code !== 0) {
     throw new Error(
       `Agora STT bridge failed (exit ${result.code}): ${result.stderr.trim() || "no stderr"}`,
@@ -1342,13 +1503,38 @@ async function waitForAssistantReply(params: {
   return null;
 }
 
-async function synthesizeElevenLabsAudio(params: {
+async function fetchResponseWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function prepareTtsText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= DEFAULT_TTS_MAX_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, DEFAULT_TTS_MAX_CHARS).trim()} ...`;
+}
+
+async function synthesizeHumeAudio(params: {
   text: string;
   apiKey?: string;
   backendUrl?: string;
   voiceId: string;
-  modelId: string;
-  outputFormat: string;
+  speed: number;
+  timeoutMs: number;
 }): Promise<string> {
   const attempts: Array<{
     label: string;
@@ -1359,25 +1545,122 @@ async function synthesizeElevenLabsAudio(params: {
     attempts.push({
       label: "backend",
       run: () =>
-        fetch(`${params.backendUrl}/api/tts/elevenlabs`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+        fetchResponseWithTimeout(
+          `${params.backendUrl}/api/tts/hume`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text: params.text,
+              voiceId: params.voiceId,
+              speed: params.speed,
+            }),
           },
-          body: JSON.stringify({
-            text: params.text,
-            voiceId: params.voiceId,
-            modelId: params.modelId,
-            outputFormat: params.outputFormat,
-          }),
-        }),
+          params.timeoutMs,
+        ),
     });
   }
   if (params.apiKey) {
     attempts.push({
       label: "direct",
       run: () =>
-        fetch(
+        fetchResponseWithTimeout(
+          "https://api.hume.ai/v0/tts/file",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Hume-Api-Key": params.apiKey ?? "",
+            },
+            body: JSON.stringify({
+              utterances: [
+                {
+                  text: params.text,
+                  voice: {
+                    id: params.voiceId,
+                  },
+                  speed: params.speed,
+                },
+              ],
+              format: {
+                type: "mp3",
+              },
+              num_generations: 1,
+            }),
+          },
+          params.timeoutMs,
+        ),
+    });
+  }
+
+  let lastError: Error | undefined;
+  for (const attempt of attempts) {
+    const response = await attempt.run();
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      lastError = new Error(
+        `Hume TTS ${attempt.label} request failed (${response.status}): ${
+          detail.slice(0, 280) || "empty response"
+        }`,
+      );
+      continue;
+    }
+
+    const audioBytes = Buffer.from(await response.arrayBuffer());
+    const filePath = path.join(
+      os.tmpdir(),
+      `vora-hume-${Date.now()}-${randomUUID().slice(0, 8)}.mp3`,
+    );
+    await fs.writeFile(filePath, audioBytes);
+    return filePath;
+  }
+
+  throw lastError ?? new Error("Hume TTS unavailable: missing backend URL or API key");
+}
+
+async function synthesizeElevenLabsAudio(params: {
+  text: string;
+  apiKey?: string;
+  backendUrl?: string;
+  voiceId: string;
+  modelId: string;
+  outputFormat: string;
+  timeoutMs: number;
+}): Promise<string> {
+  const attempts: Array<{
+    label: string;
+    run: () => Promise<Response>;
+  }> = [];
+
+  if (params.backendUrl) {
+    attempts.push({
+      label: "backend",
+      run: () =>
+        fetchResponseWithTimeout(
+          `${params.backendUrl}/api/tts/elevenlabs`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text: params.text,
+              voiceId: params.voiceId,
+              modelId: params.modelId,
+              outputFormat: params.outputFormat,
+            }),
+          },
+          params.timeoutMs,
+        ),
+    });
+  }
+  if (params.apiKey) {
+    attempts.push({
+      label: "direct",
+      run: () =>
+        fetchResponseWithTimeout(
           `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
             params.voiceId,
           )}?output_format=${encodeURIComponent(params.outputFormat)}`,
@@ -1393,6 +1676,7 @@ async function synthesizeElevenLabsAudio(params: {
               model_id: params.modelId,
             }),
           },
+          params.timeoutMs,
         ),
     });
   }
@@ -1424,7 +1708,10 @@ async function synthesizeElevenLabsAudio(params: {
 
 function hasBinary(command: string): boolean {
   const checker = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(checker, [command], { stdio: "ignore", shell: process.platform === "win32" });
+  const result = spawnSync(checker, [command], {
+    stdio: "ignore",
+    shell: process.platform === "win32",
+  });
   return result.status === 0;
 }
 
@@ -1432,6 +1719,27 @@ async function playAudioFile(filePath: string): Promise<boolean> {
   if (process.platform === "darwin" && hasBinary("afplay")) {
     const result = await runShellCommand(`afplay "${filePath.replaceAll('"', '\\"')}"`, 120_000);
     return result.code === 0;
+  }
+  if (process.platform === "win32" && hasBinary("powershell")) {
+    const script = [
+      "Add-Type -AssemblyName PresentationCore;",
+      "$player = New-Object System.Windows.Media.MediaPlayer;",
+      `$player.Open([Uri]${quotePowerShellLiteral(filePath)});`,
+      "$player.Play();",
+      "for ($i = 0; $i -lt 100 -and -not $player.NaturalDuration.HasTimeSpan; $i++) { Start-Sleep -Milliseconds 50 };",
+      "if ($player.NaturalDuration.HasTimeSpan) { Start-Sleep -Milliseconds ([int]$player.NaturalDuration.TimeSpan.TotalMilliseconds + 250) } else { Start-Sleep -Milliseconds 5000 };",
+      "$player.Close();",
+    ].join(" ");
+    const command = [
+      "powershell",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-STA",
+      "-EncodedCommand",
+      encodePowerShellCommand(script),
+    ].join(" ");
+    return (await runShellCommand(command, 120_000)).code === 0;
   }
   if (process.platform === "linux" && hasBinary("ffplay")) {
     const result = await runShellCommand(
@@ -1487,11 +1795,50 @@ async function speakWithSystemVoice(text: string): Promise<boolean> {
 }
 
 async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<void> {
-  if (resolved.tts.provider !== "elevenlabs") {
+  if (resolved.tts.provider === "none") {
     return;
   }
+  const ttsText = prepareTtsText(text);
+  if (!ttsText) {
+    return;
+  }
+
+  if (resolved.tts.provider === "hume") {
+    if (!resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
+      defaultRuntime.error("[voice] Hume TTS skipped: missing backend/API key");
+      return;
+    }
+    let audioPath: string;
+    try {
+      audioPath = await synthesizeHumeAudio({
+        text: ttsText,
+        apiKey: resolved.tts.humeApiKey,
+        backendUrl: resolved.tts.backendUrl,
+        voiceId: resolved.tts.humeVoiceId,
+        speed: resolved.tts.humeSpeed,
+        timeoutMs: resolved.tts.timeoutMs,
+      });
+    } catch (error) {
+      defaultRuntime.error(`[voice] Hume TTS failed: ${String(error)}; using system fallback`);
+      const spoke = await speakWithSystemVoice(ttsText);
+      if (!spoke) {
+        defaultRuntime.error("[voice] system TTS fallback unavailable");
+      }
+      return;
+    }
+    try {
+      const played = await playAudioFile(audioPath);
+      if (!played) {
+        defaultRuntime.log(`[voice] Hume audio generated: ${audioPath}`);
+      }
+    } finally {
+      await fs.rm(audioPath, { force: true }).catch(() => undefined);
+    }
+    return;
+  }
+
   if (!resolved.tts.backendUrl && !resolved.tts.elevenLabsApiKey) {
-    const spoke = await speakWithSystemVoice(text);
+    const spoke = await speakWithSystemVoice(ttsText);
     if (!spoke) {
       defaultRuntime.error("[voice] ElevenLabs TTS skipped: missing API key");
     }
@@ -1500,16 +1847,17 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   let audioPath: string;
   try {
     audioPath = await synthesizeElevenLabsAudio({
-      text,
+      text: ttsText,
       apiKey: resolved.tts.elevenLabsApiKey,
       backendUrl: resolved.tts.backendUrl,
       voiceId: resolved.tts.elevenLabsVoiceId,
       modelId: resolved.tts.elevenLabsModelId,
       outputFormat: resolved.tts.elevenLabsOutputFormat,
+      timeoutMs: resolved.tts.timeoutMs,
     });
   } catch (error) {
     defaultRuntime.error(`[voice] ElevenLabs TTS failed: ${String(error)}`);
-    const spoke = await speakWithSystemVoice(text);
+    const spoke = await speakWithSystemVoice(ttsText);
     if (!spoke) {
       defaultRuntime.error("[voice] system TTS fallback unavailable");
     }
@@ -1525,16 +1873,288 @@ async function speakReply(resolved: VoiceRuntimeOptions, text: string): Promise<
   }
 }
 
+function normalizeVoiceIntentText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isVoiceSleepIntent(text: string): boolean {
+  const normalized = normalizeVoiceIntentText(text);
+  return [
+    "sleep",
+    "go to sleep",
+    "stop listening",
+    "stop listen",
+    "that is all",
+    "thats all",
+    "thank you vora",
+    "thanks vora",
+    "nghi di",
+    "dung nghe",
+  ].includes(normalized);
+}
+
+function isRememberScreenIntent(text: string): boolean {
+  const normalized = normalizeVoiceIntentText(text);
+  return [
+    "remember what am i doing now",
+    "remember what i am doing now",
+    "remember what im doing now",
+    "remember what i m doing now",
+    "remember what i am doing",
+    "remember what im doing",
+    "remember this screen",
+    "remember my screen",
+    "save what i am doing",
+    "save what im doing",
+    "look at my screen and remember",
+    "nho toi dang lam gi",
+    "nho man hinh nay",
+    "ghi nho man hinh",
+    "ghi nho toi dang lam gi",
+  ].some((phrase) => normalized.includes(phrase));
+}
+
+function truncateForVoiceContext(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxChars).trim()}...`;
+}
+
+function buildVoiceMessage(params: {
+  transcript: string;
+  state?: VoiceConversationState;
+  followUp?: boolean;
+}): string {
+  const transcript = params.transcript.trim();
+  if (!params.followUp || !params.state?.lastUser || !params.state.lastAssistant) {
+    return transcript;
+  }
+  return [
+    "[VORA voice follow-up: answer as part of the same spoken conversation. Use the previous turn only as lightweight context.]",
+    `Previous user: ${truncateForVoiceContext(params.state.lastUser, 220)}`,
+    `Previous VORA: ${truncateForVoiceContext(params.state.lastAssistant, 320)}`,
+    "",
+    `Latest user: ${transcript}`,
+  ].join("\n");
+}
+
+function buildRememberScreenPrompt(transcript: string): string {
+  return [
+    "The user asked VORA to remember what they are doing now.",
+    "Analyze the attached screenshot. Reply in 1-3 short sentences.",
+    "State what the user appears to be doing and ask whether they want help continuing.",
+    "Keep it natural and concise. Do not mention internal storage unless the user asks.",
+    "",
+    `User voice command: ${transcript}`,
+  ].join("\n");
+}
+
+async function captureScreenToPng(): Promise<string> {
+  const filePath = path.join(
+    os.tmpdir(),
+    `vora-screen-${Date.now()}-${randomUUID().slice(0, 8)}.png`,
+  );
+
+  if (process.platform === "darwin") {
+    const result = await runShellCommand(`screencapture -x ${quoteShell(filePath)}`, 20_000);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "screencapture failed");
+    }
+    return filePath;
+  }
+
+  if (process.platform === "win32" && hasBinary("powershell")) {
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "Add-Type -AssemblyName System.Drawing;",
+      "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;",
+      "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height;",
+      "$graphics = [System.Drawing.Graphics]::FromImage($bitmap);",
+      "$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size);",
+      `$bitmap.Save(${quotePowerShellLiteral(filePath)}, [System.Drawing.Imaging.ImageFormat]::Png);`,
+      "$graphics.Dispose();",
+      "$bitmap.Dispose();",
+    ].join(" ");
+    const command = [
+      "powershell",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-STA",
+      "-EncodedCommand",
+      encodePowerShellCommand(script),
+    ].join(" ");
+    const result = await runShellCommand(command, 20_000);
+    if (result.code !== 0) {
+      throw new Error(result.stderr.trim() || "PowerShell screen capture failed");
+    }
+    return filePath;
+  }
+
+  if (process.platform === "linux") {
+    const commands = [
+      hasBinary("gnome-screenshot") ? `gnome-screenshot -f ${quoteShell(filePath)}` : undefined,
+      hasBinary("scrot") ? `scrot ${quoteShell(filePath)}` : undefined,
+      hasBinary("import") ? `import -window root ${quoteShell(filePath)}` : undefined,
+    ].filter((entry): entry is string => Boolean(entry));
+    for (const command of commands) {
+      const result = await runShellCommand(command, 20_000);
+      if (result.code === 0) {
+        return filePath;
+      }
+    }
+  }
+
+  throw new Error("screen capture is not available on this OS without an installed capture tool");
+}
+
+async function captureScreenAttachment(): Promise<{
+  filePath: string;
+  attachment: VoiceAttachment;
+}> {
+  const filePath = await captureScreenToPng();
+  const bytes = await fs.readFile(filePath);
+  return {
+    filePath,
+    attachment: {
+      type: "image",
+      mimeType: "image/png",
+      fileName: path.basename(filePath),
+      content: bytes.toString("base64"),
+    },
+  };
+}
+
+async function persistScreenMemory(params: {
+  transcript: string;
+  assistantReply: string;
+  screenshotPath?: string;
+}): Promise<void> {
+  const workspaceDir = resolveDefaultAgentWorkspaceDir();
+  const memoryDir = path.join(workspaceDir, "memory", "voice-screen");
+  await fs.mkdir(memoryDir, { recursive: true });
+
+  const stamp = new Date().toISOString();
+  const safeStamp = stamp.replace(/[:.]/g, "-");
+  let screenshotRel = "";
+  if (params.screenshotPath) {
+    const screenshotTarget = path.join(memoryDir, `${safeStamp}.png`);
+    await fs.copyFile(params.screenshotPath, screenshotTarget).catch(() => undefined);
+    screenshotRel = path.relative(workspaceDir, screenshotTarget).replace(/\\/g, "/");
+  }
+
+  const summary = truncateForVoiceContext(params.assistantReply, 900);
+  const memoryPath = path.join(memoryDir, "screen-memory.md");
+  await fs.appendFile(
+    memoryPath,
+    [
+      `## ${stamp}`,
+      "",
+      `User asked: ${params.transcript}`,
+      `VORA observed: ${summary}`,
+      screenshotRel ? `Screenshot: ${screenshotRel}` : "",
+      "",
+    ]
+      .filter((line) => line !== "")
+      .join("\n") + "\n",
+    "utf8",
+  );
+
+  const heartbeatPath = path.join(workspaceDir, DEFAULT_HEARTBEAT_FILENAME);
+  let existing = "# HEARTBEAT.md\n";
+  try {
+    existing = await fs.readFile(heartbeatPath, "utf8");
+  } catch {
+    await fs.mkdir(path.dirname(heartbeatPath), { recursive: true });
+  }
+
+  const blockStart = "<!-- VORA_VOICE_LAST_SCREEN_START -->";
+  const blockEnd = "<!-- VORA_VOICE_LAST_SCREEN_END -->";
+  const block = [
+    blockStart,
+    "## Voice Screen Memory",
+    "",
+    `Last observed at: ${stamp}`,
+    `Summary: ${summary}`,
+    screenshotRel ? `Screenshot file: ${screenshotRel}` : "",
+    "",
+    'On next startup/heartbeat, briefly remind the user: "Last time I saw you were working on this. Do you want help continuing?"',
+    "If you already reminded them in this active session, reply HEARTBEAT_OK unless there is a new task.",
+    blockEnd,
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
+
+  const pattern = new RegExp(`${blockStart}[\\s\\S]*?${blockEnd}`);
+  const next = pattern.test(existing)
+    ? existing.replace(pattern, block)
+    : `${existing.trimEnd()}\n\n${block}\n`;
+  await fs.writeFile(heartbeatPath, next, "utf8");
+  defaultRuntime.log(`[voice] screen memory saved: ${memoryPath}`);
+}
+
+async function prepareVoiceTurn(params: {
+  transcript: string;
+  state?: VoiceConversationState;
+  followUp?: boolean;
+}): Promise<{
+  message: string;
+  attachments?: VoiceAttachment[];
+  rememberScreenshotPath?: string;
+}> {
+  if (!isRememberScreenIntent(params.transcript)) {
+    return {
+      message: buildVoiceMessage(params),
+    };
+  }
+
+  try {
+    const snapshot = await captureScreenAttachment();
+    defaultRuntime.log("[voice] captured screen for memory");
+    return {
+      message: buildRememberScreenPrompt(params.transcript),
+      attachments: [snapshot.attachment],
+      rememberScreenshotPath: snapshot.filePath,
+    };
+  } catch (error) {
+    defaultRuntime.error(`[voice] screen capture failed: ${String(error)}`);
+    return {
+      message: [
+        "The user asked VORA to remember what they are doing now, but screen capture failed.",
+        `Capture error: ${String(error)}`,
+        "Reply briefly with the failure and ask them to grant screen-recording permission or retry.",
+        "",
+        `User voice command: ${params.transcript}`,
+      ].join("\n"),
+    };
+  }
+}
+
 async function runGatewayVoiceTurn(params: {
   resolved: VoiceRuntimeOptions;
   gatewayClient: GatewayChatClient;
   transcript: string;
-}): Promise<boolean> {
+  state?: VoiceConversationState;
+  followUp?: boolean;
+}): Promise<{ replied: boolean; reply?: string }> {
   const transcript = params.transcript.trim();
   if (!transcript) {
-    return false;
+    return { replied: false };
   }
   defaultRuntime.log(`You: ${transcript}`);
+  const turn = await prepareVoiceTurn({
+    transcript,
+    state: params.state,
+    followUp: params.followUp,
+  });
 
   const beforeHistory = await params.gatewayClient.loadHistory({
     sessionKey: params.resolved.gateway.sessionKey,
@@ -1544,9 +2164,10 @@ async function runGatewayVoiceTurn(params: {
 
   const run = await params.gatewayClient.sendChat({
     sessionKey: params.resolved.gateway.sessionKey,
-    message: transcript,
+    message: turn.message,
     thinking: params.resolved.gateway.thinking,
     deliver: params.resolved.gateway.deliver,
+    attachments: turn.attachments,
     timeoutMs: params.resolved.gateway.timeoutMs,
   });
   defaultRuntime.log(`[voice] run started: ${run.runId}`);
@@ -1561,12 +2182,101 @@ async function runGatewayVoiceTurn(params: {
     defaultRuntime.error(
       `[voice] no assistant reply received within ${params.resolved.gateway.waitMs}ms`,
     );
-    return false;
+    return { replied: false };
   }
 
   defaultRuntime.log(`Vora: ${reply}`);
   await speakReply(params.resolved, reply);
-  return true;
+  if (params.state) {
+    params.state.lastUser = transcript;
+    params.state.lastAssistant = reply;
+  }
+  if (turn.rememberScreenshotPath) {
+    await persistScreenMemory({
+      transcript,
+      assistantReply: reply,
+      screenshotPath: turn.rememberScreenshotPath,
+    }).catch((error) => {
+      defaultRuntime.error(`[voice] failed to save screen memory: ${String(error)}`);
+    });
+  }
+  return { replied: true, reply };
+}
+
+async function runVoiceConversation(params: {
+  resolved: VoiceRuntimeOptions;
+  gatewayClient: GatewayChatClient;
+  firstTranscript: string;
+  state: VoiceConversationState;
+  onSuccessfulTurn: () => void;
+}): Promise<void> {
+  let transcript = params.firstTranscript.trim();
+  let followUp = false;
+  let followUpTurns = 0;
+
+  while (transcript && !isVoiceSleepIntent(transcript)) {
+    const result = await runGatewayVoiceTurn({
+      resolved: params.resolved,
+      gatewayClient: params.gatewayClient,
+      transcript,
+      state: params.state,
+      followUp,
+    });
+    if (!result.replied) {
+      return;
+    }
+
+    params.onSuccessfulTurn();
+    if (params.resolved.once) {
+      return;
+    }
+    if (
+      !params.resolved.conversation.followUpEnabled ||
+      followUpTurns >= params.resolved.conversation.followUpMaxTurns
+    ) {
+      return;
+    }
+
+    const followUpListenMs = Math.min(
+      params.resolved.conversation.followUpMs,
+      params.resolved.conversation.followUpSttTimeoutMs,
+    );
+    defaultRuntime.log(
+      `[voice] follow-up window open for ${Math.round(
+        followUpListenMs / 1000,
+      )}s; speak naturally, or stay quiet to sleep`,
+    );
+
+    let nextTranscript = "";
+    try {
+      nextTranscript = (
+        await transcribeSpeech(params.resolved, {
+          timeoutMs: followUpListenMs,
+          prompt: "Follow-up (blank to sleep): ",
+        })
+      ).trim();
+    } catch (error) {
+      const message = String(error);
+      if (message.toLowerCase().includes("timeout")) {
+        defaultRuntime.log("[voice] follow-up silence; returning to wake word");
+        return;
+      }
+      throw error;
+    }
+
+    if (!nextTranscript) {
+      defaultRuntime.log("[voice] follow-up silence; returning to wake word");
+      return;
+    }
+    if (isVoiceSleepIntent(nextTranscript)) {
+      defaultRuntime.log("[voice] sleeping; wake word armed next");
+      return;
+    }
+
+    followUp = true;
+    followUpTurns += 1;
+    transcript = nextTranscript;
+  }
 }
 
 export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
@@ -1589,6 +2299,11 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
       "Agora STT provider needs a bridge command. Use --agora-stt-command or VORA_AGORA_STT_COMMAND.",
     );
   }
+  if (resolved.tts.provider === "hume" && !resolved.tts.backendUrl && !resolved.tts.humeApiKey) {
+    throw new Error(
+      "Hume TTS enabled but no backend/API key is configured. Set --backend-url, --hume-api-key, VORA_HUME_API_KEY, or HUME_API_KEY.",
+    );
+  }
   if (
     resolved.tts.provider === "elevenlabs" &&
     !resolved.tts.backendUrl &&
@@ -1605,6 +2320,7 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     password: resolved.gateway.password,
   });
   const wakeWord = new WakeWordEngine(resolved.wake);
+  const conversationState: VoiceConversationState = {};
   let busy = false;
   let turns = 0;
   let stopRequested = false;
@@ -1631,6 +2347,7 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
           resolved,
           gatewayClient,
           transcript: resolved.gateway.initialMessage,
+          state: conversationState,
         });
       } catch (err) {
         defaultRuntime.error(`[voice] initial turn failed: ${String(err)}`);
@@ -1666,16 +2383,19 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
             defaultRuntime.log("[voice] transcript empty; waiting for next wake trigger");
             return;
           }
-          const replied = await runGatewayVoiceTurn({
-            resolved,
-            gatewayClient,
-            transcript,
-          });
-          if (!replied) {
+          if (isVoiceSleepIntent(transcript)) {
+            defaultRuntime.log("[voice] sleep command heard; wake word remains armed");
             return;
           }
-
-          turns += 1;
+          await runVoiceConversation({
+            resolved,
+            gatewayClient,
+            firstTranscript: transcript,
+            state: conversationState,
+            onSuccessfulTurn: () => {
+              turns += 1;
+            },
+          });
           if (resolved.once && turns >= 1) {
             requestStop();
           }
@@ -1701,6 +2421,14 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     defaultRuntime.log(
       `wake=${resolved.wake.modelPath} threshold=${resolved.wake.threshold} stt=${resolved.stt.provider} tts=${resolved.tts.provider}`,
     );
+    if (resolved.conversation.followUpEnabled && !resolved.once) {
+      defaultRuntime.log(
+        `follow-up=on max=${resolved.conversation.followUpMaxTurns} listen=${Math.round(
+          Math.min(resolved.conversation.followUpMs, resolved.conversation.followUpSttTimeoutMs) /
+            1000,
+        )}s`,
+      );
+    }
     defaultRuntime.log(
       "Listening for wake word. Press Ctrl+C to stop. Run `vora voice doctor` if dependencies fail.",
     );
@@ -1745,11 +2473,19 @@ function addVoiceOptions(cmd: Command) {
       "--backend-url <url>",
       `Voice backend URL for provider secrets/tokens (default: ${DEFAULT_VOICE_BACKEND_URL}; use "off" for local env mode)`,
     )
-    .option("--tts-provider <none|elevenlabs>", "Voice reply provider")
+    .option("--tts-provider <none|hume|elevenlabs>", "Voice reply provider")
+    .option("--tts-timeout-ms <ms>", "TTS synthesis timeout (ms)")
+    .option("--hume-api-key <key>", "Hume API key")
+    .option("--hume-voice-id <id>", "Hume voice ID")
+    .option("--hume-speed <speed>", "Hume speaking speed (0.5..2, default 1.2)")
     .option("--eleven-labs-api-key <key>", "ElevenLabs API key")
     .option("--eleven-labs-voice-id <id>", "ElevenLabs voice ID")
     .option("--eleven-labs-model-id <id>", "ElevenLabs model ID")
-    .option("--eleven-labs-output-format <format>", "ElevenLabs output format");
+    .option("--eleven-labs-output-format <format>", "ElevenLabs output format")
+    .option("--no-follow-up", "Require wake word before every voice turn")
+    .option("--follow-up-ms <ms>", "Maximum follow-up listening window after each reply")
+    .option("--follow-up-max-turns <n>", "Maximum follow-up turns before re-arming wake word")
+    .option("--follow-up-stt-timeout-ms <ms>", "STT timeout for each follow-up turn");
 }
 
 export function registerVoiceCli(program: Command) {
@@ -1757,7 +2493,7 @@ export function registerVoiceCli(program: Command) {
     program
       .command("voice")
       .description(
-        "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional ElevenLabs TTS)",
+        "Wake-word terminal voice loop (OpenWakeWord trigger + STT bridge + Gateway chat + optional Hume TTS)",
       )
       .addHelpText(
         "after",

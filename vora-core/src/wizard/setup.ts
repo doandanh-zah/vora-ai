@@ -167,7 +167,7 @@ async function setupQuickstartVoiceRuntime(params: {
     [
       "QuickStart will prepare terminal voice runtime now.",
       "This installs wake-word Python dependencies into ~/.vora/voice-python.",
-      "STT/TTS use the VORA backend by default, so local Agora/ElevenLabs keys are not required.",
+      "STT/TTS use the VORA backend by default, so local Agora/Hume keys are not required.",
     ].join("\n"),
     "Voice runtime",
   );

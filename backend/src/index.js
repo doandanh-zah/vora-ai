@@ -37,6 +37,7 @@ async function bootstrap() {
             config.agora.customerKey &&
             config.agora.customerSecret,
         ),
+        hume: Boolean(config.hume.apiKey),
         elevenlabs: Boolean(config.elevenlabs.apiKey),
       },
     });
@@ -56,6 +57,7 @@ async function bootstrap() {
         "POST /api/agora/token",
         "POST /api/agora/stt/start",
         "POST /api/agora/stt/stop",
+        "POST /api/tts/hume",
         "POST /api/tts/elevenlabs",
         "POST /api/actions",
         "GET  /api/actions/mine",
