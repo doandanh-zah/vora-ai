@@ -18,6 +18,7 @@ import { parseTimeoutMs } from "./parse-timeout.js";
 
 type VoiceSttProvider = "manual" | "agora";
 type VoiceTtsProvider = "none" | "hume" | "elevenlabs";
+type VoiceWakeAckMode = "local" | "agent" | "off";
 
 type VoiceAttachment = {
   type?: string;
@@ -65,6 +66,8 @@ type VoiceRootOptions = {
   followUpMs?: string;
   followUpMaxTurns?: string;
   followUpSttTimeoutMs?: string;
+  wakeAck?: string;
+  wakeAckWaitMs?: string;
   debug?: boolean;
 };
 
@@ -95,6 +98,10 @@ type VoiceRuntimeOptions = {
     modelPath: string;
     threshold: number;
     pythonBin: string;
+  };
+  wakeAck: {
+    mode: VoiceWakeAckMode;
+    waitMs: number;
   };
   backendUrl?: string;
   stt: {
@@ -160,8 +167,10 @@ const DEFAULT_FOLLOW_UP_MAX_TURNS = 4;
 const DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS = 10_000;
 const DEFAULT_BACKEND_PROBE_TIMEOUT_MS = 60_000;
 const DEFAULT_BACKEND_STT_PROBE_TIMEOUT_MS = 60_000;
-const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 20_000;
-const DEFAULT_WAKE_ACK_WAIT_MS = 12_000;
+const DEFAULT_STT_BRIDGE_COMMAND_GRACE_MS = 8_000;
+const DEFAULT_WAKE_ACK_WAIT_MS = 2_500;
+const DEFAULT_WAKE_ACK_MODE: VoiceWakeAckMode = "local";
+const DEFAULT_VOICE_THINKING = "off";
 const WAKE_PYTHON_MODULES = ["openwakeword", "pyaudio", "numpy"] as const;
 const WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS = 60_000;
 
@@ -390,6 +399,14 @@ function parseTtsProvider(params: {
   return params.elevenLabsApiKey ? "elevenlabs" : "none";
 }
 
+function parseWakeAckMode(raw: string | undefined): VoiceWakeAckMode {
+  const value = raw?.trim().toLowerCase();
+  if (value === "agent" || value === "local" || value === "off") {
+    return value;
+  }
+  return DEFAULT_WAKE_ACK_MODE;
+}
+
 function detectPythonBinary(explicitPython?: string): string | null {
   const venvPython = resolveVenvPythonBin();
   const candidates = [
@@ -558,7 +575,10 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       sessionKey: trimToUndefined(opts.session) ?? "main",
       deliver: Boolean(opts.deliver),
       initialMessage: trimToUndefined(opts.message),
-      thinking: trimToUndefined(opts.thinking),
+      thinking:
+        trimToUndefined(opts.thinking) ??
+        trimToUndefined(process.env.VORA_VOICE_THINKING) ??
+        DEFAULT_VOICE_THINKING,
       timeoutMs: parseTimeoutMs(opts.timeoutMs),
       waitMs: parseMs(opts.waitMs, DEFAULT_WAIT_MS),
     },
@@ -569,6 +589,12 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       modelPath: path.isAbsolute(wakeModelName) ? wakeModelName : path.join(wakeDir, wakeModelName),
       threshold: parseThreshold(opts.wakeThreshold),
       pythonBin,
+    },
+    wakeAck: {
+      mode: parseWakeAckMode(
+        trimToUndefined(opts.wakeAck) ?? trimToUndefined(process.env.VORA_VOICE_WAKE_ACK),
+      ),
+      waitMs: parseMs(opts.wakeAckWaitMs, DEFAULT_WAKE_ACK_WAIT_MS),
     },
     stt: {
       provider: sttProvider,
@@ -2462,6 +2488,15 @@ async function runWakeGreeting(params: {
   resolved: VoiceRuntimeOptions;
   gatewayClient: GatewayChatClient;
 }): Promise<void> {
+  if (params.resolved.wakeAck.mode === "off") {
+    return;
+  }
+
+  if (params.resolved.wakeAck.mode === "local") {
+    voiceMessageBox("Vora", "I'm here. Preparing the microphone now.");
+    return;
+  }
+
   const beforeHistory = await params.gatewayClient.loadHistory({
     sessionKey: params.resolved.gateway.sessionKey,
     limit: 100,
@@ -2485,7 +2520,7 @@ async function runWakeGreeting(params: {
     sessionKey: params.resolved.gateway.sessionKey,
     beforeText,
     beforeAssistantCount,
-    waitMs: Math.min(params.resolved.gateway.waitMs, DEFAULT_WAKE_ACK_WAIT_MS),
+    waitMs: Math.min(params.resolved.gateway.waitMs, params.resolved.wakeAck.waitMs),
   });
   if (reply) {
     voiceMessageBox("Vora", reply);
@@ -2642,6 +2677,9 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
     voiceBox("VORA Voice", [
       `Gateway session: ${resolved.gateway.sessionKey}`,
       `Wake threshold: ${resolved.wake.threshold}`,
+      `Wake ack: ${resolved.wakeAck.mode}${
+        resolved.wakeAck.mode === "agent" ? ` (${formatMs(resolved.wakeAck.waitMs)} max)` : ""
+      }`,
       `STT: ${resolved.stt.provider} (${resolved.stt.language}; English-only default)`,
       `TTS: ${resolved.tts.provider} (timeout ${formatMs(resolved.tts.timeoutMs)})`,
       resolved.conversation.followUpEnabled && !resolved.once
@@ -2709,6 +2747,11 @@ function addVoiceOptions(cmd: Command) {
     .option("--follow-up-ms <ms>", "Maximum follow-up listening window after each reply")
     .option("--follow-up-max-turns <n>", "Maximum follow-up turns before re-arming wake word")
     .option("--follow-up-stt-timeout-ms <ms>", "STT timeout for each follow-up turn")
+    .option(
+      "--wake-ack <local|agent|off>",
+      'Wake acknowledgement mode. Default "local" avoids a slow model call before STT.',
+    )
+    .option("--wake-ack-wait-ms <ms>", "Max wait for --wake-ack agent before opening STT")
     .option("--debug", "Show low-level voice runtime diagnostics", false);
 }
 

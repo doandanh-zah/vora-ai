@@ -3,6 +3,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_API_BASE = "https://api.agora.io";
@@ -36,6 +38,8 @@ function printUsage() {
     "  --customer-secret <s>  Agora customer secret (or VORA_AGORA_CUSTOMER_SECRET)",
     "  --port <port>          Fixed local bridge port",
     "  --browser-mode <mode>  managed|external|none (default: managed)",
+    "  --browser-user-data-dir <path>",
+    "                         Persistent browser profile for faster SDK/mic startup",
     "  --show-browser         Show the managed browser window for debugging",
     "  --no-open              Do not start the managed/external capture page",
     "  --help                 Show this help",
@@ -47,6 +51,7 @@ function printUsage() {
     "  VORA_AGORA_STT_AUDIO_UID, VORA_AGORA_STT_TEXT_UID, VORA_AGORA_STT_BOT_UID",
     "  VORA_AGORA_API_BASE, VORA_AGORA_STT_TIMEOUT_MS, VORA_AGORA_STT_LANG",
     "  VORA_AGORA_STT_BROWSER_MODE, VORA_AGORA_STT_SHOW_BROWSER",
+    "  VORA_AGORA_STT_BROWSER_USER_DATA_DIR",
   ];
   process.stderr.write(`${lines.join("\n")}\n`);
 }
@@ -211,7 +216,11 @@ function browserExecutableCandidates() {
   ];
 }
 
-async function openManagedBrowser(url, showBrowser) {
+function defaultBrowserUserDataDir() {
+  return path.join(os.homedir(), ".vora", "agora-stt-browser");
+}
+
+async function openManagedBrowser(url, showBrowser, userDataDir) {
   let chromium;
   try {
     ({ chromium } = await import("playwright-core"));
@@ -236,8 +245,12 @@ async function openManagedBrowser(url, showBrowser) {
       "--use-fake-ui-for-media-stream",
       "--autoplay-policy=no-user-gesture-required",
       "--no-first-run",
+      "--disable-default-apps",
+      "--disable-extensions",
       "--disable-background-timer-throttling",
     ],
+    permissions: ["microphone"],
+    viewport: { width: 720, height: 520 },
   };
   if (executablePath) {
     launchOptions.executablePath = executablePath;
@@ -247,16 +260,26 @@ async function openManagedBrowser(url, showBrowser) {
     launchOptions.channel = "chrome";
   }
 
-  const browser = await chromium.launch(launchOptions);
-  const context = await browser.newContext({
-    permissions: ["microphone"],
-    viewport: { width: 720, height: 520 },
-  });
-  const page = await context.newPage();
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(userDataDir, launchOptions);
+  } catch (error) {
+    const fallbackDir = path.join(
+      os.tmpdir(),
+      `vora-agora-stt-browser-${process.pid}-${Date.now()}`,
+    );
+    process.stderr.write(
+      `[agora-stt-bridge] stage=browser persistent profile unavailable; using temp profile (${String(
+        error,
+      ).slice(0, 180)})\n`,
+    );
+    context = await chromium.launchPersistentContext(fallbackDir, launchOptions);
+  }
+  const page = context.pages()[0] || (await context.newPage());
   await page.goto(url, { waitUntil: "domcontentloaded" });
   return {
     close: async () => {
-      await browser.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
     },
   };
 }
@@ -804,6 +827,11 @@ async function main() {
     open: args.open !== false,
     browserMode: args.open === false ? "none" : resolveBrowserMode(args),
     showBrowser: readBoolean(args["show-browser"], "VORA_AGORA_STT_SHOW_BROWSER", false),
+    browserUserDataDir: readText(
+      args["browser-user-data-dir"],
+      "VORA_AGORA_STT_BROWSER_USER_DATA_DIR",
+      defaultBrowserUserDataDir(),
+    ),
     port: readPositiveInt(args.port, "VORA_AGORA_STT_PORT", 0),
   };
 
@@ -1030,8 +1058,15 @@ async function main() {
   }, Math.max(18_000, resolvedConfig.timeoutMs + 8_000));
   if (config.browserMode === "managed") {
     try {
-      browserController = await openManagedBrowser(localUrl, config.showBrowser);
-      emitStage("browser", `capture browser started${config.showBrowser ? "" : " hidden"}`);
+      browserController = await openManagedBrowser(
+        localUrl,
+        config.showBrowser,
+        config.browserUserDataDir,
+      );
+      emitStage(
+        "browser",
+        `capture browser started${config.showBrowser ? "" : " hidden"} profile=${config.browserUserDataDir}`,
+      );
     } catch (error) {
       await fail(
         [
