@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import {
   Send, Mic, MicOff, MessageSquare, AudioLines, Settings,
-  Sparkles, Trash2, Save, Menu, Key, Server, Cpu, Plus,
+  Trash2, Save, Menu, Key, Server, Cpu, Plus,
   MessageCircle, Globe, Hash, Bot, Shield, Eye, EyeOff
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,7 @@ export const ChatPage = () => {
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequiredPayload | null>(null);
   const [phase1Check, setPhase1Check] = useState<Phase1SelfCheck | null>(null);
   const [checkingPhase1, setCheckingPhase1] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<'idle' | 'listening' | 'thinking' | 'speaking'>('idle');
 
   const [cfg, setCfg] = useState({
     provider: 'groq', groq_api_key: '', ollama_model: 'llama3.2',
@@ -98,11 +99,14 @@ export const ChatPage = () => {
   const [showTele, setShowTele] = useState(false);
   const [showDiscord, setShowDiscord] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const listenReasonRef = useRef<'manual' | 'wake'>('manual');
   const privacyEnabledRef = useRef(true);
   const loadingRef = useRef(false);
+  const unlistenRef = useRef<{ wake?: () => void; confirm?: () => void }>({});
+  const refreshSessionsRef = useRef<(autoSelect?: boolean) => Promise<void>>(() => Promise.resolve());
 
   const pushVoiceLog = (text: string) => {
     const line = `${new Date().toLocaleTimeString()}  ${text}`;
@@ -163,60 +167,11 @@ export const ChatPage = () => {
       }
     })();
 
-    const maybeWindow = window as SpeechWindow;
-    const SpeechCtor = maybeWindow.SpeechRecognition || maybeWindow.webkitSpeechRecognition;
-    if (SpeechCtor) {
-      const recognition = new SpeechCtor();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'vi-VN';
-      recognition.maxAlternatives = 1;
-      recognition.onstart = () => {
-        setListening(true);
-        setVoiceText('Listening...');
-      };
-      recognition.onend = () => {
-        setListening(false);
-        setVoiceText('');
-      };
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let finalText = '';
-        let interimText = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          const transcript = result?.[0]?.transcript || '';
-          if (result.isFinal) finalText += transcript;
-          else interimText += transcript;
-        }
-        if (interimText.trim()) {
-          setVoiceText(interimText.trim());
-        }
-        if (finalText.trim()) {
-          const clean = finalText.trim();
-          pushVoiceLog(`STT(${listenReasonRef.current}): ${clean}`);
-          setVoiceText(clean);
-          setTimeout(() => setVoiceText(''), 1200);
-          void sendVoiceCommand(clean);
-        }
-      };
-      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        const msg = event?.error || 'unknown';
-        setListening(false);
-        setVoiceText('');
-        setWakeStatus(`STT error: ${msg}`);
-        pushVoiceLog(`STT error: ${msg}`);
-      };
-      recognitionRef.current = recognition;
-      setSttSupported(true);
-    } else {
-      setSttSupported(false);
-      setWakeStatus('STT not supported in this WebView');
-    }
+    const privacyEnabledRefCurrent = { current: privacyEnabled };
 
-    let wakeWordUnlisten: (() => void) | null = null;
-    let confirmUnlisten: (() => void) | null = null;
     void (async () => {
-      wakeWordUnlisten = await listen<WakeWordEventPayload>('wakeword-event', (event) => {
+      if (unlistenRef.current.wake) return;
+      unlistenRef.current.wake = await listen<WakeWordEventPayload>('wake-word-event', (event) => {
         const payload = event.payload;
         if (!payload) return;
         if (payload.kind === 'volume' && typeof payload.volume === 'number') {
@@ -227,21 +182,65 @@ export const ChatPage = () => {
         }
         if (payload.kind === 'error') {
           setWakeRunning(false);
+          if (payload.message) {
+            const isWarning = payload.message.includes('DeprecationWarning') || 
+                             payload.message.includes('ExperimentalWarning') ||
+                             payload.message.includes('trace-deprecation');
+            
+            if (!isWarning) {
+              if (payload.message.includes('[agora-stt-bridge]')) {
+                pushVoiceLog(`[VOICE] ${payload.message}`);
+              } else {
+                pushVoiceLog(`[ERROR] ${payload.message}`);
+              }
+            }
+          }
         }
         if (payload.kind === 'trigger') {
           listenReasonRef.current = 'wake';
           pushVoiceLog(`Wake detected (${payload.model || 'hey_vora'})`);
-          const recognizer = recognitionRef.current;
-          if (recognizer && privacyEnabledRef.current) {
-            try { recognizer.start(); } catch { /* ignore busy */ }
+          if (privacyEnabledRef.current) {
+            startEngineVoiceTurn();
           }
         }
         if (typeof payload.message === 'string' && payload.message.trim()) {
-          setWakeStatus(payload.message);
+          const msg = payload.message.trim();
+          setWakeStatus(msg);
+          
+          const lowerMsg = msg.toLowerCase();
+          const isSpam = lowerMsg.includes('mic volume') || 
+                        lowerMsg.includes('volume update') || 
+                        lowerMsg.includes('listening for wake word') ||
+                        lowerMsg.includes('audio stream') ||
+                        lowerMsg.includes('stream started') ||
+                        lowerMsg.includes('mic level');
+
+          if (!isSpam && (payload.kind === 'log' || payload.kind === undefined)) {
+            pushVoiceLog(msg);
+          }
+
+          // Drive voicePhase and session refresh from log content
+          if (msg.includes('Listening now')) {
+            setVoicePhase('listening');
+          } else if (msg.includes('is thinking') || msg.includes('VORA is thinking')) {
+            setVoicePhase('thinking');
+          } else if (msg.includes('TTS') || msg.includes('speaking')) {
+            setVoicePhase('speaking');
+          } else if (msg.includes('Voice turn completed') || msg.includes('completed successfully')) {
+            setVoicePhase('idle');
+            refreshSessionsRef.current();
+            // Auto-restart wake word listening after voice turn finishes
+            setTimeout(() => {
+              if (privacyEnabledRef.current) {
+                invoke('start_wakeword_engine').catch(console.error);
+              }
+            }, 1500);
+          }
         }
       });
 
-      confirmUnlisten = await listen<ConfirmRequiredPayload>('confirm-required', (event) => {
+      if (unlistenRef.current.confirm) return;
+      unlistenRef.current.confirm = await listen<ConfirmRequiredPayload>('confirm-required', (event) => {
         const payload = event.payload;
         if (!payload?.id) return;
         setPendingConfirm(payload);
@@ -253,10 +252,35 @@ export const ChatPage = () => {
         try { recognitionRef.current.stop(); } catch { /* ignore */ }
         recognitionRef.current = null;
       }
-      if (wakeWordUnlisten) wakeWordUnlisten();
-      if (confirmUnlisten) confirmUnlisten();
+      if (unlistenRef.current.wake) {
+        unlistenRef.current.wake();
+        unlistenRef.current.wake = undefined;
+      }
+      if (unlistenRef.current.confirm) {
+        unlistenRef.current.confirm();
+        unlistenRef.current.confirm = undefined;
+      }
     };
   }, []);
+
+  // Auto-start wake word engine when entering Voice tab, stop when leaving
+  useEffect(() => {
+    if (mode === 'voice') {
+      if (privacyEnabled && !wakeRunning) {
+        invoke('start_wakeword_engine')
+          .then(() => setWakeStatus('Wake word engine running — say "Hey Vora"'))
+          .catch((e) => setWakeStatus(`Wake word error: ${String(e)}`));
+      }
+    } else {
+      // Leaving voice tab — stop engine
+      if (wakeRunning) {
+        invoke('stop_wakeword_engine')
+          .then(() => { setWakeRunning(false); setWakeStatus('Wake word engine stopped'); })
+          .catch(console.error);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   useEffect(() => {
     privacyEnabledRef.current = privacyEnabled;
@@ -279,9 +303,15 @@ export const ChatPage = () => {
       if (autoSelect) {
         if (list.length > 0) await switchSession(list[0].id);
         else await newChat();
+      } else if (activeId) {
+        // Reload messages for the currently active session (e.g. after voice turn)
+        const msgs = await invoke<ChatMessage[]>('load_session', { sessionId: activeId });
+        setMessages(msgs);
       }
     } catch (e) { console.error(e); }
   };
+  // Keep ref up-to-date so the event listener closure always gets the latest version
+  refreshSessionsRef.current = refreshSessions;
 
   const switchSession = async (id: string) => {
     const msgs = await invoke<ChatMessage[]>('load_session', { sessionId: id });
@@ -303,6 +333,12 @@ export const ChatPage = () => {
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (transcriptScrollRef.current) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [transcriptLog]);
 
   const autoResize = () => {
     const ta = textareaRef.current;
@@ -440,9 +476,29 @@ export const ChatPage = () => {
     setVoiceText('');
   };
 
+  const startEngineVoiceTurn = async () => {
+    if (!privacyEnabled) {
+      setWakeStatus('Privacy mode is OFF. Voice engine is disabled.');
+      return;
+    }
+    setListening(true);
+    setVoicePhase('listening');
+    setVoiceText('Engine is listening...');
+    pushVoiceLog('Starting Manual Voice Turn (TSS)...');
+    try {
+      // Returns immediately — session refresh happens via wake-word-event listener
+      await invoke('start_manual_voice_turn');
+    } catch (error) {
+      console.error('Voice turn failed', error);
+      setWakeStatus(`Voice error: ${stringifyError(error)}`);
+      setVoicePhase('idle');
+      setListening(false);
+      setVoiceText('');
+    }
+  };
+
   const toggleVoice = () => {
-    if (listening) stopVoiceRecognition();
-    else startVoiceRecognition('manual');
+    startEngineVoiceTurn();
   };
 
   const toggleWakeEngine = async () => {
@@ -451,6 +507,7 @@ export const ChatPage = () => {
         await invoke('stop_wakeword_engine');
         setWakeRunning(false);
         setWakeStatus('Wake word engine stopped');
+        pushVoiceLog('Wake word engine manually stopped');
         return;
       }
       if (!privacyEnabled) {
@@ -458,7 +515,8 @@ export const ChatPage = () => {
         return;
       }
       await invoke('start_wakeword_engine');
-      setWakeStatus('Starting wake word engine...');
+      setWakeStatus('Starting wake word engine…');
+      pushVoiceLog('[WAKE] Engine starting… say “Hey Vora”');
     } catch (e: any) {
       console.error(e);
       setWakeRunning(false);
@@ -894,63 +952,154 @@ export const ChatPage = () => {
 
         {/* ─── VOICE MODE ─── */}
         {mode === 'voice' && (
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-primary/5 rounded-full blur-3xl animate-pulse" />
+          <div className="flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+            <div className="flex-1 flex flex-col items-center justify-center p-8 relative min-h-[600px]">
+              {/* Background glow — changes colour per phase */}
+              <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full blur-3xl animate-pulse transition-colors duration-700 ${
+                voicePhase === 'listening' ? 'bg-primary/10' :
+                voicePhase === 'thinking'  ? 'bg-amber-500/10' :
+                voicePhase === 'speaking'  ? 'bg-emerald-500/10' :
+                'bg-primary/5'
+              }`} />
               
-              <div className="z-10 flex flex-col items-center gap-10">
-                <div className="text-center space-y-2">
-                   <p className="text-[10px] font-black uppercase tracking-[0.4em] text-primary/60">
-                    Neural Interface 0.1
-                  </p>
-                  <p className="text-xl font-bold tracking-tight">
-                    {listening ? 'Neural Stream Open' : 'Waiting for Signal'}
+              <div className="z-10 flex flex-col items-center gap-8">
+                {/* Phase label */}
+                <div className="text-center space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.4em] text-primary/60">Neural Interface 0.1</p>
+                  <p className={`text-xl font-bold tracking-tight transition-colors duration-300 ${
+                    voicePhase === 'listening' ? 'text-primary' :
+                    voicePhase === 'thinking'  ? 'text-amber-400' :
+                    voicePhase === 'speaking'  ? 'text-emerald-400' :
+                    'text-foreground'
+                  }`}>
+                    {voicePhase === 'listening' ? '🎙 Đang lắng nghe...' :
+                     voicePhase === 'thinking'  ? '🧠 Vora đang suy nghĩ...' :
+                     voicePhase === 'speaking'  ? '🔊 Vora đang trả lời...' :
+                     'Waiting for Signal'}
                   </p>
                 </div>
 
+                {/* ── MIC BUTTON ── */}
                 <div 
-                   className={`relative cursor-pointer group transition-all duration-500 rounded-full p-1 border-2 ${
-                     listening ? 'border-primary shadow-[0_0_40px_rgba(108,92,231,0.3)]' : 'border-white/10'
-                   }`}
-                   onClick={toggleVoice}
+                  className={`relative cursor-pointer transition-all duration-500 rounded-full p-1 border-2 ${
+                    voicePhase === 'listening' ? 'border-primary shadow-[0_0_40px_rgba(108,92,231,0.35)]' :
+                    voicePhase === 'thinking'  ? 'border-amber-500 shadow-[0_0_30px_rgba(245,158,11,0.3)]' :
+                    voicePhase === 'speaking'  ? 'border-emerald-500 shadow-[0_0_30px_rgba(16,185,129,0.3)]' :
+                    'border-white/10 hover:border-white/30'
+                  }`}
+                  onClick={voicePhase === 'idle' ? toggleVoice : undefined}
                 >
                   <div className={`w-32 h-32 rounded-full flex items-center justify-center transition-all bg-card/50 backdrop-blur-xl ${
-                    listening ? 'scale-90' : 'scale-100'
+                    voicePhase !== 'idle' ? 'scale-90' : 'scale-100'
                   }`}>
-                    {listening ? <MicOff className="h-10 w-10 text-primary" /> : <Mic className="h-10 w-10 text-muted-foreground" />}
-                    
-                    {/* Animated waves while listening */}
-                    {listening && (
+
+                    {/* IDLE */}
+                    {voicePhase === 'idle' && <Mic className="h-10 w-10 text-muted-foreground group-hover:text-foreground transition-colors" />}
+
+                    {/* LISTENING — pulsing waveform bars */}
+                    {voicePhase === 'listening' && (
+                      <svg viewBox="0 0 40 28" width="48" height="34" className="text-primary">
+                        {[4,10,16,22,28,34].map((x, i) => (
+                          <rect key={i} x={x} y="0" width="3" rx="1.5"
+                            fill="currentColor" opacity="0.85"
+                            style={{
+                              height: '28px',
+                              transformOrigin: `${x+1.5}px 14px`,
+                              animation: `voiceBar 0.8s ease-in-out ${i * 0.12}s infinite alternate`,
+                            }}
+                          />
+                        ))}
+                      </svg>
+                    )}
+
+                    {/* THINKING — spinning dots */}
+                    {voicePhase === 'thinking' && (
+                      <svg viewBox="0 0 40 40" width="48" height="48" className="text-amber-400 animate-spin" style={{ animationDuration: '1.4s' }}>
+                        {[0,1,2,3,4,5,6,7].map(i => (
+                          <circle key={i}
+                            cx={20 + 14 * Math.cos(i * Math.PI / 4)}
+                            cy={20 + 14 * Math.sin(i * Math.PI / 4)}
+                            r={i % 2 === 0 ? 2.5 : 1.5}
+                            fill="currentColor"
+                            opacity={0.3 + i * 0.09}
+                          />
+                        ))}
+                      </svg>
+                    )}
+
+                    {/* SPEAKING — radiating sound waves */}
+                    {voicePhase === 'speaking' && (
+                      <svg viewBox="0 0 60 60" width="56" height="56" className="text-emerald-400">
+                        {/* Speaker icon */}
+                        <path d="M22 20 L30 14 L30 46 L22 40 L14 40 L14 20 Z" fill="currentColor" opacity="0.9"/>
+                        {/* Waves */}
+                        {[1,2,3].map(i => (
+                          <path key={i}
+                            d={`M34 ${30 - i*5} Q${38 + i*3} 30 34 ${30 + i*5}`}
+                            fill="none" stroke="currentColor" strokeWidth="2"
+                            strokeLinecap="round" opacity="0.7"
+                            style={{ animation: `speakWave 1s ease-in-out ${i * 0.2}s infinite alternate` }}
+                          />
+                        ))}
+                      </svg>
+                    )}
+
+                    {/* Ripple rings */}
+                    {voicePhase !== 'idle' && (
                       <div className="absolute inset-0 -z-10">
-                        <div className="absolute inset-0 rounded-full border border-primary animate-ping opacity-20" />
-                        <div className="absolute inset-2 rounded-full border border-primary animate-ping [animation-delay:0.3s] opacity-10" />
+                        <div className={`absolute inset-0 rounded-full border animate-ping opacity-20 ${
+                          voicePhase === 'listening' ? 'border-primary' :
+                          voicePhase === 'thinking'  ? 'border-amber-400' :
+                          'border-emerald-400'
+                        }`} />
+                        <div className={`absolute inset-2 rounded-full border animate-ping [animation-delay:0.4s] opacity-10 ${
+                          voicePhase === 'listening' ? 'border-primary' :
+                          voicePhase === 'thinking'  ? 'border-amber-400' :
+                          'border-emerald-400'
+                        }`} />
                       </div>
                     )}
                   </div>
                 </div>
 
-                {voiceText && (
-                  <p className="text-base font-medium italic text-foreground text-center max-w-sm animate-in fade-in slide-in-from-bottom-2 px-4 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                {/* Tap hint when idle */}
+                {voicePhase === 'idle' && (
+                  <p className="text-[10px] text-muted-foreground/50 uppercase tracking-widest">Nhấn để nói</p>
+                )}
+
+                {voiceText && voicePhase !== 'idle' && (
+                  <p className="text-sm font-medium italic text-foreground/80 text-center max-w-sm animate-in fade-in px-4">
                     "{voiceText}"
                   </p>
                 )}
 
-                <div className="flex flex-col items-center gap-4 mt-4">
-                  <Button 
-                    variant={wakeRunning ? 'secondary' : 'outline'} 
-                    size="sm" 
-                    onClick={toggleWakeEngine}
-                    className={`h-9 px-6 gap-2 rounded-full border-white/10 text-[10px] uppercase font-black tracking-widest ${wakeRunning ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : ''}`}
-                  >
+                {/* Wake Engine Status — auto-managed */}
+                <div className="flex flex-col items-center gap-3 mt-2">
+                  {/* Status badge */}
+                  <div className={`flex items-center gap-2 px-4 py-2 rounded-full border text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${
+                    wakeRunning
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-white/5 border-white/10 text-muted-foreground/50'
+                  }`}>
                     <div className={`w-1.5 h-1.5 rounded-full ${wakeRunning ? 'bg-emerald-400 animate-pulse' : 'bg-muted-foreground/30'}`} />
-                    {wakeRunning ? 'Neural Wake ACTIVE' : 'Init Wake Engine'}
-                  </Button>
-                  <div className="flex flex-col items-center gap-1.5">
-                    <p className="text-[9px] text-muted-foreground uppercase font-medium tracking-widest">{wakeStatus}</p>
-                    <div className="w-32 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                      <div className="h-full bg-primary transition-all duration-150 shadow-[0_0_5px_var(--primary)]" style={{ width: `${wakeVolume}%` }} />
-                    </div>
+                    {wakeRunning ? 'Listening for "Hey Vora"' : 'Wake word engine inactive'}
                   </div>
+
+                  {/* Mic volume bar */}
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="w-36 h-1 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                      <div className="h-full bg-primary transition-all duration-100 shadow-[0_0_5px_var(--primary)]" style={{ width: `${wakeVolume}%` }} />
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/40 uppercase tracking-widest">{wakeStatus}</p>
+                  </div>
+
+                  {/* Manual override */}
+                  <button
+                    onClick={toggleWakeEngine}
+                    className="text-[9px] text-muted-foreground/30 hover:text-muted-foreground/60 uppercase tracking-widest transition-colors underline underline-offset-2"
+                  >
+                    {wakeRunning ? 'Stop engine' : 'Start engine manually'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -962,19 +1111,38 @@ export const ChatPage = () => {
                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50">Terminal Stream</p>
                    <Badge variant="outline" className="text-[8px] h-4">STT: {sttSupported ? 'Ready' : 'Inert'}</Badge>
                  </div>
-                 <ScrollArea className="h-28 rounded-xl bg-black/20 border border-white/5 p-2">
+                 <div 
+                   ref={transcriptScrollRef}
+                   className="h-28 rounded-xl bg-black/20 border border-white/5 p-3 overflow-y-auto custom-scrollbar"
+                 >
                     <div className="space-y-1">
                       {transcriptLog.length === 0 && <p className="text-[10px] text-muted-foreground italic px-1">Neural channel empty...</p>}
                       {transcriptLog.map((line, idx) => (
-                        <p key={idx} className="text-[10px] font-mono text-muted-foreground/80 leading-tight">
-                          <span className="text-primary/70 opacity-50">{line.slice(0, 8)}</span>
+                        <p key={idx} className="text-[10px] font-mono leading-tight" style={{
+                          color: line.includes('[ERROR]') ? 'rgb(248,113,113)' :
+                                 line.includes('[VOICE]') ? 'rgb(52,211,153)' :
+                                 'rgba(255,255,255,0.5)'
+                        }}>
+                          <span className="opacity-40">{line.slice(0, 8)}</span>
                           <span className="ml-2">{line.slice(10)}</span>
                         </p>
                       ))}
                     </div>
-                 </ScrollArea>
+                 </div>
                </div>
             </div>
+
+            {/* Keyframe injection */}
+            <style>{`
+              @keyframes voiceBar {
+                from { transform: scaleY(0.2); }
+                to   { transform: scaleY(1);   }
+              }
+              @keyframes speakWave {
+                from { opacity: 0.3; transform: scaleX(0.8); }
+                to   { opacity: 1;   transform: scaleX(1.1); }
+              }
+            `}</style>
           </div>
         )}
       </main>
