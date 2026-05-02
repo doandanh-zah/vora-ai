@@ -106,8 +106,8 @@ type VoiceRuntimeOptions = {
   backendUrl?: string;
   stt: {
     provider: VoiceSttProvider;
-    language: string;
-    timeoutMs: number;
+    language: "en-US"; // Force English by default to prevent system language interference
+    timeoutMs: 16_000;
     agoraCommand?: string;
     usesBundledBridge: boolean;
   };
@@ -130,6 +130,7 @@ type VoiceRuntimeOptions = {
     followUpSttTimeoutMs: number;
   };
   once: boolean;
+  sttFirst: boolean;
 };
 
 type VoiceCheckItem = {
@@ -259,21 +260,35 @@ function resolveBundledAgoraBridgeScriptPath(): string {
     path.resolve(import.meta.dirname, "..", "scripts", "agora-stt-bridge.mjs"),
     path.resolve(import.meta.dirname, "..", "..", "scripts", "agora-stt-bridge.mjs"),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+  const found = candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+  // On Windows, try to return a path relative to CWD if it's cleaner
+  if (process.platform === "win32") {
+    const rel = path.relative(process.cwd(), found);
+    return rel.length < found.length ? rel : found;
+  }
+  return found;
 }
 
 function quoteShell(value: string): string {
-  return `"${value.replaceAll('"', '\\"')}"`;
+  if (!value) return '""';
+  // If there are no spaces and no special characters, we don't need quotes on Windows
+  if (process.platform === "win32" && !/[\s&|<>^%]/.test(value)) {
+    return value;
+  }
+  // On Windows, quotes are escaped by doubling them, but for most shells just wrapping is enough
+  // unless we're dealing with raw cmd.exe /c which is handled by resolveShellCommand.
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function buildBundledAgoraBridgeCommand(backendUrl?: string): string | undefined {
   const scriptPath = resolveBundledAgoraBridgeScriptPath();
-  if (!existsSync(scriptPath)) {
+  if (!existsSync(path.resolve(process.cwd(), scriptPath))) {
     return undefined;
   }
   const parts = [
     "node",
-    quoteShell(scriptPath),
+    // Ensure no quotes for internal paths without spaces to avoid shell mangling
+    scriptPath.includes(" ") ? `"${scriptPath}"` : scriptPath,
     "--lang {lang}",
     "--timeout-ms {timeout_ms}",
     "--browser-mode managed",
@@ -468,7 +483,7 @@ function checkWakePythonDependencies(pythonBin: string): {
     const result = spawnSync(pythonBin, ["-c", script], {
       encoding: "utf8",
       timeout: WAKE_PYTHON_DEPENDENCY_CHECK_TIMEOUT_MS,
-      shell: process.platform === "win32",
+      shell: false,
     });
     const raw = String(result.stdout ?? "").trim();
     let missing: string[] = [];
@@ -582,6 +597,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       timeoutMs: parseTimeoutMs(opts.timeoutMs),
       waitMs: parseMs(opts.waitMs, DEFAULT_WAIT_MS),
     },
+    sttFirst: Boolean(opts.sttFirst),
     backendUrl,
     wake: {
       dir: wakeDir,
@@ -645,6 +661,7 @@ function resolveVoiceRuntimeOptions(opts: VoiceRootOptions): VoiceRuntimeOptions
       followUpSttTimeoutMs: parseMs(opts.followUpSttTimeoutMs, DEFAULT_FOLLOW_UP_STT_TIMEOUT_MS),
     },
     once: Boolean(opts.once),
+    sttFirst: Boolean(opts.sttFirst),
   };
 }
 
@@ -1138,7 +1155,6 @@ class WakeWordEngine {
     this.process = spawn(this.options.pythonBin, args, {
       cwd: this.options.dir,
       stdio: ["ignore", "pipe", "pipe"],
-      shell: process.platform === "win32",
     });
 
     this.process.on("error", (err) => {
@@ -1181,7 +1197,6 @@ class WakeWordEngine {
     if (process.platform === "win32" && this.process.pid) {
       spawn("taskkill", ["/pid", String(this.process.pid), "/f", "/t"], {
         stdio: "ignore",
-        shell: true,
       });
     } else {
       this.process.kill("SIGTERM");
@@ -1245,18 +1260,6 @@ async function promptLine(question: string): Promise<string> {
   });
 }
 
-function resolveShellCommand(command: string): { bin: string; args: string[] } {
-  if (process.platform === "win32") {
-    return {
-      bin: "cmd.exe",
-      args: ["/d", "/s", "/c", command],
-    };
-  }
-  return {
-    bin: "/bin/sh",
-    args: ["-lc", command],
-  };
-}
 
 async function runShellCommand(
   command: string,
@@ -1269,8 +1272,37 @@ async function runShellCommand(
   stdout: string;
   stderr: string;
 }> {
-  const shell = resolveShellCommand(command);
-  const child = spawn(shell.bin, shell.args, {
+  // Safe argument splitting for Windows/Unix without using shell:true
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      // Keep quotes for the spawn if they wrap a path with spaces
+      current += char; 
+    } else if (char === " " && !inQuotes) {
+      if (current) {
+        parts.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (current) parts.push(current);
+  
+  // Remove wrapping quotes after split because spawn() doesn't need them
+  const cleanedParts = parts.map(p => {
+    if (p.startsWith('"') && p.endsWith('"')) {
+      return p.slice(1, -1);
+    }
+    return p;
+  });
+
+  const bin = cleanedParts.shift() || "node";
+  const child = spawn(bin, cleanedParts, {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -1329,7 +1361,7 @@ async function runStreamingCommand(bin: string, args: string[], cwd?: string): P
     const child = spawn(bin, args, {
       cwd,
       stdio: "inherit",
-      shell: process.platform === "win32",
+      shell: false,
     });
     child.on("error", reject);
     child.on("close", (code) => {
@@ -1343,11 +1375,7 @@ async function runStreamingCommand(bin: string, args: string[], cwd?: string): P
 }
 
 async function ensureOpenWakeWordResources(pythonBin: string): Promise<void> {
-  const script = [
-    "from openwakeword.utils import download_models",
-    "# Custom VORA wake-word models still need openWakeWord feature models.",
-    "download_models(model_names=['vora_custom_model'])",
-  ].join("\n");
+  const script = "from openwakeword.utils import download_models; download_models(model_names=['vora_custom_model'])";
   defaultRuntime.log("Preparing openWakeWord runtime models.");
   await runStreamingCommand(pythonBin, ["-c", script]);
 }
@@ -1357,7 +1385,7 @@ function commandSucceeds(bin: string, args: string[]): boolean {
     return (
       spawnSync(bin, args, {
         stdio: "ignore",
-        shell: process.platform === "win32",
+        shell: false,
       }).status === 0
     );
   } catch {
@@ -1835,6 +1863,9 @@ async function synthesizeElevenLabsAudio(params: {
               voiceId: params.voiceId,
               modelId: params.modelId,
               outputFormat: params.outputFormat,
+              ...(shouldSpawnWithShell({ resolvedCommand: "node", platform: process.platform })
+                ? { shell: false }
+                : {}),
             }),
           },
           params.timeoutMs,
@@ -2589,6 +2620,36 @@ export async function runVoiceLoop(opts: VoiceRootOptions): Promise<void> {
   try {
     gatewayClient.start();
     await gatewayClient.waitForReady();
+    if (resolved.sttFirst) {
+      void (async () => {
+        if (busy || stopRequested) {
+          return;
+        }
+        busy = true;
+        try {
+          voiceInfo("Neural Interface: Triggering immediate manual turn.");
+          const transcript = (await transcribeSpeech(resolved, { phase: "command" })).trim();
+          if (transcript) {
+            await runVoiceConversation({
+              resolved,
+              gatewayClient,
+              firstTranscript: transcript,
+              state: conversationState,
+              onSuccessfulTurn: () => {
+                turns += 1;
+              },
+            });
+          }
+        } catch (err) {
+          defaultRuntime.error(`[voice] manual turn failed: ${String(err)}`);
+        } finally {
+          busy = false;
+          if (resolved.once) {
+            requestStop();
+          }
+        }
+      })();
+    }
 
     if (resolved.gateway.initialMessage) {
       busy = true;
@@ -2719,12 +2780,14 @@ function addVoiceOptions(cmd: Command) {
     .option("--timeout-ms <ms>", "chat.send timeout override (ms)")
     .option("--wait-ms <ms>", "Wait budget for assistant reply after send (ms)")
     .option("--once", "Stop after one successful wake->reply turn", false)
+    .option("--stt-first", "Start listening immediately without waiting for wake word", false)
     .option("--wake-dir <path>", "Path to wake_word directory")
     .option("--wake-model <path>", "Wake model path or file name")
     .option("--wake-threshold <0..1>", "Wake word threshold")
     .option("--python <bin>", "Python binary for wake word process")
     .option("--stt-provider <manual|agora>", "STT mode (agora uses external bridge command)")
     .option("--stt-lang <lang>", "STT language hint passed to bridge command")
+    .option("--lang <lang>", "Alias for --stt-lang")
     .option("--stt-timeout-ms <ms>", "STT timeout (ms)")
     .option(
       "--agora-stt-command <cmd>",

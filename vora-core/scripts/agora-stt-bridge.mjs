@@ -667,6 +667,8 @@ function buildBrowserHtml(browserConfig) {
           await post("/stage", { stage: "mic", message: "requesting microphone" });
           setStatus("Microphone setup...");
           micTrack = await AgoraRTC.createMicrophoneAudioTrack();
+          const micName = micTrack.getTrackLabel ? micTrack.getTrackLabel() : "unknown";
+          await post("/stage", { stage: "mic_info", message: "Using microphone: " + micName });
           await client.publish([micTrack]);
 
           await post("/stage", { stage: "stt_join", message: "joining Agora STT" });

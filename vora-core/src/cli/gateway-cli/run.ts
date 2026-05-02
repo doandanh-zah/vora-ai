@@ -518,7 +518,6 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
       {
         detached: true,
         stdio: "ignore",
-        shell: true,
       },
     );
 

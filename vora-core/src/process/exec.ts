@@ -263,7 +263,7 @@ export async function runCommandWithTimeout(
       env: resolvedEnv,
       windowsVerbatimArguments: useCmdWrapper ? true : windowsVerbatimArguments,
       ...(shouldSpawnWithShell({ resolvedCommand, platform: process.platform })
-        ? { shell: true }
+        ? { shell: false }
         : {}),
     },
   );

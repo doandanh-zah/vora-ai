@@ -17,6 +17,20 @@ function ensureSymlink(targetValue, targetPath, type) {
     fs.symlinkSync(targetValue, targetPath, type);
     return;
   } catch (error) {
+    if (error?.code === "EPERM" && process.platform === "win32") {
+      // Fallback to copy if symlinks aren't allowed.
+      // Note: This won't work for directories if type is 'junction', 
+      // but let's try to handle files first.
+      try {
+        const absoluteTarget = path.resolve(path.dirname(targetPath), targetValue);
+        if (fs.statSync(absoluteTarget).isFile()) {
+          fs.copyFileSync(absoluteTarget, targetPath);
+          return;
+        }
+      } catch {
+        // Fall through to original error handling
+      }
+    }
     if (error?.code !== "EEXIST") {
       throw error;
     }
@@ -31,7 +45,18 @@ function ensureSymlink(targetValue, targetPath, type) {
   }
 
   removePathIfExists(targetPath);
-  fs.symlinkSync(targetValue, targetPath, type);
+  try {
+    fs.symlinkSync(targetValue, targetPath, type);
+  } catch (error) {
+    if (error?.code === "EPERM" && process.platform === "win32") {
+      const absoluteTarget = path.resolve(path.dirname(targetPath), targetValue);
+      if (fs.statSync(absoluteTarget).isFile()) {
+        fs.copyFileSync(absoluteTarget, targetPath);
+        return;
+      }
+    }
+    throw error;
+  }
 }
 
 function symlinkPath(sourcePath, targetPath, type) {

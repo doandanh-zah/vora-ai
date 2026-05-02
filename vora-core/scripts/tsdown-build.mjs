@@ -95,6 +95,10 @@ if (fatalUnresolvedImport) {
   process.exit(1);
 }
 
+if (result.error) {
+  console.error("Spawn error:", result.error);
+}
+
 if (typeof result.status === "number") {
   process.exit(result.status);
 }
