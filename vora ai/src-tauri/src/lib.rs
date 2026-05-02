@@ -10,10 +10,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::path::PathBuf;
 use std::env::home_dir;
 
-#[cfg(target_os = "windows")]
-const VORA_BIN: &str = "vora.cmd";
-#[cfg(not(target_os = "windows"))]
-const VORA_BIN: &str = "vora";
+fn get_vora_bin() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop(); // to vora ai
+    p.pop(); // to vora-ai root
+    p.push("vora-core");
+    #[cfg(target_os = "windows")]
+    p.push("vora.cmd");
+    #[cfg(not(target_os = "windows"))]
+    p.push("vora");
+    p
+}
 
 // --- Data Structures ---
 
@@ -184,6 +191,26 @@ fn save_sessions(app: &AppHandle, sessions: &[ChatSession]) {
 }
 
 fn resolve_wakeword_python() -> Option<String> {
+    // 1. Try venv first
+    if let Some(mut p) = home_dir() {
+        p.push(".vora");
+        p.push("voice-python");
+        #[cfg(target_os = "windows")]
+        p.push("Scripts");
+        #[cfg(not(target_os = "windows"))]
+        p.push("bin");
+        
+        #[cfg(target_os = "windows")]
+        p.push("python.exe");
+        #[cfg(not(target_os = "windows"))]
+        p.push("python3");
+
+        if p.exists() {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+
+    // 2. Fallback to system
     for candidate in ["python3", "python"] {
         if Command::new(candidate)
             .arg("--version")
@@ -217,7 +244,7 @@ struct WakeWordEvent {
 }
 
 fn emit_wakeword_event(app: &AppHandle, event: WakeWordEvent) {
-    let _ = app.emit("wakeword-event", event);
+    let _ = app.emit("wake-word-event", event);
 }
 
 fn parse_and_emit_wakeword_line(app: &AppHandle, line: &str) {
@@ -242,7 +269,7 @@ fn parse_and_emit_wakeword_line(app: &AppHandle, line: &str) {
         let parsed = raw_vol.trim().parse::<u8>().unwrap_or(0).min(100);
         emit_wakeword_event(app, WakeWordEvent {
             kind: "volume".into(),
-            message: "Mic volume update".into(),
+            message: "".into(),
             model: None,
             score: None,
             volume: Some(parsed),
@@ -404,7 +431,7 @@ fn call_gateway(
     expect_final: bool,
     data: &SetupData,
 ) -> Result<serde_json::Value, String> {
-    let mut cmd = Command::new(VORA_BIN);
+    let mut cmd = Command::new(get_vora_bin());
     
     // Inject auth from Tauri state into the CLI environment
     cmd.env("GROQ_API_KEY", &data.groq_api_key)
@@ -606,20 +633,20 @@ async fn update_settings(
     fs::write(get_config_path(&app), serde_json::to_string(&data).unwrap()).ok();
 
     // Sync to VORA CLI config permanently (Global)
-    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("gateway.port").arg(gateway_port.to_string()).output();
-    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("channels.telegram.botToken").arg(telegram_token).output();
-    let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("channels.discord.token").arg(discord_token).output();
+    let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("gateway.port").arg(gateway_port.to_string()).output();
+    let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("channels.telegram.botToken").arg(telegram_token).output();
+    let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("channels.discord.token").arg(discord_token).output();
     
     if data.provider == "groq" {
          // Sync to global config
-         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("agents.defaults.model.primary").arg("groq/llama-3.1-8b-instant").output();
-         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("models.providers.groq.apiKey").arg(&groq_api_key).output();
+         let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("agents.defaults.model.primary").arg("groq/llama-3.1-8b-instant").output();
+         let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("models.providers.groq.apiKey").arg(&groq_api_key).output();
          
          // Deep sync to agent-specific files (overwriting isolated configs)
          sync_agent_credentials(&groq_api_key);
     } else if data.provider == "ollama" {
-         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("agents.defaults.model.primary").arg(format!("ollama/{}", ollama_model)).output();
-         let _ = Command::new(VORA_BIN).arg("config").arg("set").arg("models.providers.ollama.baseUrl").arg(&ollama_base_url).output();
+         let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("agents.defaults.model.primary").arg(format!("ollama/{}", ollama_model)).output();
+         let _ = Command::new(get_vora_bin()).arg("config").arg("set").arg("models.providers.ollama.baseUrl").arg(&ollama_base_url).output();
     }
 
     Ok("Settings deeply synced successfully".into())
@@ -682,7 +709,7 @@ async fn run_phase1_self_check(
         },
     ));
 
-    let gateway_check = Command::new(VORA_BIN)
+    let gateway_check = Command::new(get_vora_bin())
         .arg("--no-color")
         .arg("gateway")
         .arg("status")
@@ -836,6 +863,7 @@ async fn start_wakeword_engine(
         .unwrap_or_else(|| "hey_vora.onnx".into());
     let threshold_arg = threshold.unwrap_or(0.5).clamp(0.0, 1.0);
 
+    let app_handle_clone = app.clone();
     let mut child = Command::new(&python)
         .arg("main.py")
         .arg("--model")
@@ -846,7 +874,27 @@ async fn start_wakeword_engine(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("failed to start wake word engine: {e}"))?;
+        .map_err(|e| {
+            let err_msg = format!("Failed to spawn Python wake word engine ({}): {}", python, e);
+            emit_wakeword_event(&app_handle_clone, WakeWordEvent {
+                kind: "error".into(),
+                message: err_msg.clone(),
+                model: None,
+                score: None,
+                volume: None,
+                latency_ms: None,
+            });
+            err_msg
+        })?;
+
+    emit_wakeword_event(&app_handle_clone, WakeWordEvent {
+        kind: "log".into(),
+        message: format!("Python engine spawned (pid: {})", child.id()),
+        model: None,
+        score: None,
+        volume: None,
+        latency_ms: None,
+    });
 
     let stdout = child
         .stdout
@@ -1116,6 +1164,116 @@ async fn approve_confirm_request(
 }
 
 #[tauri::command]
+async fn start_manual_voice_turn(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let data = state.0.lock().unwrap().clone();
+    if !data.privacy_enabled {
+        return Err("Privacy mode is disabled. Enable it to use voice features.".into());
+    }
+
+    let vora_bin = get_vora_bin();
+    let mut vora_dir = vora_bin.clone();
+    vora_dir.pop();
+
+    let session_key = session_key_for_gateway(&data.active_session_id);
+
+    let vora_mjs = vora_dir.join("vora.mjs");
+    let app_handle_clone = app.clone();
+
+    // Use piped output to stream events to UI
+    let mut child = Command::new("node")
+        .arg("--no-deprecation")
+        .arg("--disable-warning=ExperimentalWarning")
+        .arg(&vora_mjs)
+        .arg("voice")
+        .arg("--once")
+        .arg("--stt-first")
+        .arg("--stt-lang")
+        .arg("en-US")
+        .arg("--stt-timeout-ms")
+        .arg("30000")
+        .arg("--session")
+        .arg(&session_key)
+        .current_dir(&vora_dir) // Crucial: run from vora-core dir
+        .env("GROQ_API_KEY", &data.groq_api_key)
+        .env("TELEGRAM_BOT_TOKEN", &data.telegram_token)
+        .env("DISCORD_BOT_TOKEN", &data.discord_token)
+        .env("OLLAMA_HOST", &data.ollama_base_url)
+        .env("VORA_VOICE_DEBUG", "1")
+        .env("VORA_AGORA_STT_SHOW_BROWSER", "true")
+        .env("VORA_VOICE_PYTHON_VENV", format!("{}\\.vora\\voice-python", home_dir().unwrap().display()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to spawn vora voice: {e}"))?;
+
+    let stdout = child.stdout.take().ok_or("failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("failed to capture stderr")?;
+
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        let app_stdout = app_handle.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                let _ = app_stdout.emit("wake-word-event", WakeWordEvent {
+                    kind: "log".into(),
+                    message: line,
+                    model: None, score: None, volume: None, latency_ms: None,
+                });
+            }
+        });
+
+        let app_stderr = app_handle.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                 let _ = app_stderr.emit("wake-word-event", WakeWordEvent {
+                    kind: "error".into(),
+                    message: line,
+                    model: None, score: None, volume: None, latency_ms: None,
+                });
+            }
+        });
+
+        app_handle.emit("wake-word-event", WakeWordEvent {
+            kind: "log".into(),
+            message: format!("Voice engine spawned (pid: {})", child.id()),
+            model: None, score: None, volume: None, latency_ms: None,
+        }).ok();
+
+        let status = child.wait();
+        match status {
+            Ok(s) if s.success() => {
+                app_handle.emit("wake-word-event", WakeWordEvent {
+                    kind: "log".into(),
+                    message: "Voice turn completed successfully".into(),
+                    model: None, score: None, volume: None, latency_ms: None,
+                }).ok();
+            },
+            Ok(s) => {
+                app_handle.emit("wake-word-event", WakeWordEvent {
+                    kind: "error".into(),
+                    message: format!("Voice engine exited with code: {}", s.code().unwrap_or(-1)),
+                    model: None, score: None, volume: None, latency_ms: None,
+                }).ok();
+            },
+            Err(e) => {
+                app_handle.emit("wake-word-event", WakeWordEvent {
+                    kind: "error".into(),
+                    message: format!("Voice engine wait error: {}", e),
+                    model: None, score: None, volume: None, latency_ms: None,
+                }).ok();
+            }
+        }
+    });
+
+    Ok("Manual voice turn started".into())
+}
+
+#[tauri::command]
 async fn deny_confirm_request(
     confirm_state: State<'_, ConfirmGateState>,
     confirm_id: String,
@@ -1152,7 +1310,7 @@ pub fn run() {
         .manage(ConfirmGateState(Mutex::new(None)))
         .manage(GatewayState(Mutex::new(None)))
         .setup(|app| {
-            let _ = Command::new(VORA_BIN)
+            let _ = Command::new(get_vora_bin())
                 .arg("gateway")
                 .arg("run")
                 .spawn()
@@ -1173,6 +1331,7 @@ pub fn run() {
             get_wakeword_status, start_wakeword_engine, stop_wakeword_engine,
             update_settings, list_sessions, create_session, load_session,
             delete_session, send_chat, inject_voice_command,
+            start_manual_voice_turn,
             approve_confirm_request, deny_confirm_request, hatch_test_prompt
         ])
         .run(tauri::generate_context!())
